@@ -1,0 +1,25 @@
+# 所有相对路径相对于源码目录（打包后相对于 exe 目录）。
+base_url: https://www.yuketang.cn
+entry_path: /v2/web
+profile_dir: edge_profile
+headless: false
+# 自动选择播放器菜单提供的最高倍速，并校验实际播放速率。
+auto_max_video_speed: true
+navigation_timeout_seconds: 35
+request_timeout_seconds: 20
+poll_seconds: 5
+scan_concurrency: 2
+max_task_attempts: 3
+video_stall_seconds: 90
+confirmation_timeout_seconds: 180
+task_timeout_seconds: 21600
+watchdog_timeout_seconds: 120
+max_restarts_per_hour: 5
+reading_characters_per_minute: 400
+# 只点明确的阅读确认按钮，不点击答题、考试或提交按钮。
+article_finish_labels: [我已阅读, 已阅读, 完成阅读]
+article_selectors: ['.graph-content', '.article-content', 'article', '.content-body']
+# 未登录核验前保持空。视频通过课程页面中的任务名称打开。
+# 可在实站核验后填写路径模板，变量为 classroom_id 和 leaf_id。
+video_path_template: ''
+article_path_template: /v2/web/lms/{classroom_id}/graph/{leaf_id}
