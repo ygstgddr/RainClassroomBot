@@ -14,6 +14,10 @@ def load_config(root=None):
     config['root'] = str(root)
     # 旧安装保留原配置文件时，也默认启用本次新增功能。
     config.setdefault('auto_max_video_speed', True)
+    config.setdefault('slides_page_seconds', 5)
+    if (type(config['slides_page_seconds']) not in (int, float)
+            or not 1 <= config['slides_page_seconds'] <= 120):
+        raise ValueError('配置 slides_page_seconds 必须在 1 到 120 秒之间')
     if not isinstance(config['auto_max_video_speed'], bool):
         raise ValueError('配置 auto_max_video_speed 必须为 true 或 false')
     config['profile_dir'] = str((root / config['profile_dir']).resolve())

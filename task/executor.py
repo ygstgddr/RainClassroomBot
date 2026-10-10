@@ -35,7 +35,7 @@ async def execute(task, adapter, browser, store, config):
                 raise RetryableError('任务超过最长运行上限，仍未确认完成')
             if page.is_closed():
                 raise RetryableError('任务页面被关闭')
-            if now >= next_check:
+            if now >= next_check and (task['kind'] != 'slides' or confirm_started is not None):
                 done, progress, evidence = await adapter.status(task)
                 store.update(task['key'], progress=progress)
                 next_check = time.monotonic() + config['poll_seconds']
@@ -47,11 +47,14 @@ async def execute(task, adapter, browser, store, config):
             store.set('current', {'key': task['key'], 'course': task['course'], 'title': task['title'],
                                   'server_progress': progress, **media})
             if media['ready']:
+                if confirm_started is None:
+                    # 本轮操作结束后立即复查一次，不额外等满一次普通轮询间隔。
+                    next_check = 0
                 confirm_started = confirm_started or now
-                if now - confirm_started > config['confirmation_timeout_seconds']:
-                    raise RetryableError('页面操作已结束，但服务器未确认完成')
+            if confirm_started is not None and now - confirm_started > config['confirmation_timeout_seconds']:
+                raise RetryableError('页面操作已结束，但服务器未确认完成')
             # 仅为状态采样频率；不以经过时间推断任务完成。
-            await asyncio.sleep(min(.5, config['poll_seconds']))
+            await asyncio.sleep(min(.1 if task['kind'] == 'slides' else .5, config['poll_seconds']))
     finally:
         if hasattr(handler, 'close'):
             handler.close()

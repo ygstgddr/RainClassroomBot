@@ -66,17 +66,18 @@ def test_pause_leaves_ppt_page_and_stops_page_recording(tmp_path):
 
 
 @pytest.mark.parametrize('broken', [False, True])
-def test_unrecorded_or_broken_ppt_does_not_advance_or_complete(tmp_path, broken):
+def test_unrecorded_or_broken_ppt_does_not_complete(tmp_path, broken):
     async def scenario(site):
         site.slides_broken=broken
         site.ignore_slide_reads=True
         config, store, browser, adapter, task=await setup(site,tmp_path)
-        config.update(video_stall_seconds=1,confirmation_timeout_seconds=1)
+        config.update(video_stall_seconds=1,confirmation_timeout_seconds=1,slides_page_seconds=.2)
         try:
-            with pytest.raises(RetryableError,match='图片加载失败|服务器记录长期未更新'):
+            with pytest.raises(RetryableError,match='图片加载失败|服务器未确认完成'):
                 await execute(task,adapter,browser,store,config)
             assert not site.slide_reads
-            assert not any(p.endswith('/1') or p.endswith('/2') for m,p in site.requests if m=='POST')
+            if broken:
+                assert not any(p.endswith('/1') or p.endswith('/2') for m,p in site.requests if m=='POST')
             assert not (await adapter.status(task))[0]
         finally:await browser.close()
     with MockSite() as site:asyncio.run(scenario(site))
@@ -98,3 +99,49 @@ def test_executor_does_not_treat_homework_as_reading(tmp_path):
     store=Store(tmp_path);store.set('desired','run')
     with pytest.raises(AdaptationRequired):
         asyncio.run(execute({'kind':'homework'},None,None,store,{}))
+
+
+def test_delayed_server_does_not_block_each_page(tmp_path):
+    """Real Edge must visit subsequent pages before delayed completion is visible."""
+    async def scenario(site):
+        site.delay = 4
+        config, store, browser, adapter, task = await setup(site, tmp_path)
+        config.update(slides_page_seconds=.8, confirmation_timeout_seconds=12)
+        try:
+            pending = asyncio.create_task(execute(task, adapter, browser, store, config))
+            for _ in range(100):
+                if len(site.slide_reads) == 3:
+                    break
+                await asyncio.sleep(.1)
+            else:
+                pytest.fail('PPT did not visit all pages without waiting on the server')
+            assert max(site.slide_reads.values()) - min(site.slide_reads.values()) < site.delay
+            assert not (await adapter.status(task))[0]
+            assert not pending.done(), 'Local browsing must not be counted as server completion'
+            evidence = await pending
+            assert evidence and (await adapter.status(task))[0]
+        finally:
+            if 'pending' in locals() and not pending.done():
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+            await browser.close()
+    with MockSite() as site:
+        asyncio.run(scenario(site))
+
+
+def test_unconfirmed_pages_are_revisited_instead_of_marked_complete(tmp_path):
+    async def scenario(site):
+        site.ignore_slide_reads = True
+        config, store, browser, adapter, task = await setup(site, tmp_path)
+        config.update(slides_page_seconds=.2, confirmation_timeout_seconds=3)
+        try:
+            with pytest.raises(RetryableError, match='服务器未确认完成'):
+                await execute(task, adapter, browser, store, config)
+            state = store.get('current', {})
+            assert state.get('reading_round', 1) > 1
+            assert not (await adapter.status(task))[0]
+            assert store.rows()[-1]['state'] != 'completed'
+        finally:
+            await browser.close()
+    with MockSite() as site:
+        asyncio.run(scenario(site))

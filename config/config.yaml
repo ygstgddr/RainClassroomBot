@@ -5,6 +5,8 @@ profile_dir: edge_profile
 headless: false
 # 自动选择播放器菜单提供的最高倍速，并校验实际播放速率。
 auto_max_video_speed: true
+# 每页可见且图片加载完成后的停留时间；浏览完再统一确认服务器进度。
+slides_page_seconds: 5
 navigation_timeout_seconds: 35
 request_timeout_seconds: 20
 poll_seconds: 5
