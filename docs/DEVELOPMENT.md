@@ -14,6 +14,14 @@ py -3.12 -m venv .venv
 
 测试含真实 Edge、本地 HTTP 模拟站和桌面 GUI 检查，因此需要能启动图形界面的 Windows 会话。模拟测试不需要真实雨课堂账号。
 
+桌面界面使用 Tkinter 与 Pillow。Pillow 随 `requirements.txt` 安装，用于绘制渐变背景、柔和阴影和圆角；文字、列表和输入控件仍可实际操作。玻璃效果由程序绘制，不依赖 macOS 或额外的网页服务。安装 Python 时请保留 Tcl/Tk 组件。
+
+只预览界面、不打开浏览器或读取本机学习记录时，可运行虚构数据演示：
+
+```powershell
+.\.venv\Scripts\python.exe main.py --demo
+```
+
 ## 项目结构
 
 ```text
@@ -28,7 +36,8 @@ RainClassroomBot/
 ├── task/                    # 扫描、调度、执行
 ├── handler/                 # 视频、原生倍速、图文、PPT
 ├── recovery/watchdog.py     # 工作进程心跳与恢复
-├── gui/interface.py         # Tkinter 界面
+├── gui/interface.py         # 页面导航与主操作状态
+├── gui/glass.py             # 玻璃风格背景和可操作控件
 ├── config/config.yaml       # 默认配置
 ├── tests/                   # 本地模拟站及回归测试
 ├── scripts/                 # 发行辅助脚本
@@ -37,6 +46,8 @@ RainClassroomBot/
 ```
 
 GUI 与浏览器工作进程分离，以消息传递状态和操作；SQLite 保存账号、课程选择、任务、尝试次数及完成证据。守护监控心跳并限制重启频率。多站点使用独立运行目录。
+
+修改交互流程时，请使用临时 Store 和虚构课程进行界面测试，并验证开始、暂停、继续、改选课程、扫描失败和切站状态。工作进程尚未停止时，不得允许更改当前执行范围。主按钮发出操作意图，是否需要扫描由工作进程根据当前账号和选课范围判断；不要在 GUI 的定时刷新中绕过扫描直接执行任务。
 
 ## 修改适配逻辑
 
@@ -66,7 +77,7 @@ Compress-Archive -Path .\dist\RainClassroomBot -DestinationPath .\RainClassroomB
 Get-FileHash .\RainClassroomBot-Windows-x64.zip -Algorithm SHA256
 ```
 
-主要依赖在 requirements 中固定版本；传递依赖和本机 Python/Edge 仍可能随环境变化，应重新运行测试并验证最终 exe。0.4.1 实际验证版本记录于 VALIDATION。
+主要依赖在 requirements 中固定版本；传递依赖和本机 Python/Edge 仍可能随环境变化，应重新运行测试并验证最终 exe。当前版本的实际验证范围记录于 [VALIDATION.md](../VALIDATION.md)。
 
 ## 发布前检查
 

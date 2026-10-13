@@ -111,7 +111,7 @@ async def scan(adapter, store, config, logger, catalog_only=False):
             store.set('scanned_courses', selected)
         if catalog_only:
             progress['message'] = (f"课程列表已更新：{len(courses)} 门，时间读取失败 {progress['failed']} 门。"
-                                   '请勾选课程，再点击“重新扫描”；勾选自动保存。')
+                                   '勾选课程后点击“开始任务”，扫描会自动完成；勾选自动保存。')
         store.set('scan_time', time.time())
         record(store, logger, '扫描结束', progress['message'])
         return progress

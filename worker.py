@@ -6,8 +6,7 @@ from browser.site_adapter import SiteAdapter
 from core.errors import LoginRequired, Interrupted
 from core.logging_setup import make_logger, record
 from core.store import Store
-from task.scanner import scan
-from task.scheduler import run_queue
+from core.workflow import Workflow
 
 
 async def worker_async(config):
@@ -36,51 +35,56 @@ async def worker_async(config):
     health = asyncio.create_task(probe())
     try:
         store.set('worker_status', '正在启动 Edge')
-        await browser.start(headed=store.get('force_headed', False))
+        headed = store.get('force_headed', False)
+        await browser.start(headed=headed)
         adapter = SiteAdapter(browser, config)
+        flow = Workflow(adapter, browser, store, config, logger)
         await browser.pause_media()
+        previous = None
         while store.get('desired') != 'shutdown':
             desired = store.get('desired', 'idle')
-            store.set('worker_status', {'idle': '就绪', 'paused': '已暂停', 'login': store.get('login_message', '请在 Edge 登录后点击“刷新课程时间”'),
-                                        'catalog': '读取课程时间', 'scan': '扫描中', 'run': '执行中'}.get(desired, desired))
-            if desired in ('idle', 'paused', 'login'):
+            if desired in ('idle', 'paused'):
+                flow.clear_login()
+                if desired != previous:
+                    phase = store.get('workflow', {}).get('phase')
+                    if phase not in ('ready', 'paused', 'error', 'account_changed'):
+                        flow.show('paused' if desired == 'paused' else 'ready',
+                                  '已暂停，点击继续即可恢复' if desired == 'paused' else '选好课程后即可开始')
+                previous = desired
                 await asyncio.sleep(.5)
                 continue
+            previous = desired
             try:
                 store.set('worker_busy', True)
-                if desired in ('scan', 'catalog'):
-                    adapter.account_id = None  # 用户主动扫描允许识别新账号。
-                    result = await scan(adapter, store, config, logger, catalog_only=desired == 'catalog')
-                    if store.get('desired') == desired:
-                        store.set('desired', 'paused' if result['status'] == 'failed' else 'idle')
-                elif desired == 'run':
-                    account = await adapter.account()
-                    store.set('account', account)
-                    if not store.scope_scanned(account['id']):
-                        result = await scan(adapter, store, config, logger)
-                        if result['status'] == 'failed':
-                            store.set('desired', 'paused')
-                            continue
-                    await run_queue(adapter, browser, store, config, logger)
+                if desired == 'login':
+                    await flow.poll_login()
+                    # 每三秒探测登录；间隔内每半秒检查暂停/关闭，返回请求也再次检查。
+                    store.set('worker_busy', False)
+                    for _ in range(6):
+                        if store.get('desired') != 'login':
+                            break
+                        await asyncio.sleep(.5)
+                elif desired in ('catalog', 'scan', 'run'):
+                    await flow.perform(desired)
                 else:
-                    store.set('desired', 'idle')
+                    flow.transition(desired, 'idle')
             except Interrupted:
                 await browser.pause_media()
             except LoginRequired as exc:
-                store.set('login_message', str(exc))
-                store.set('desired', 'login')
-                store.set('force_headed', True)
-                record(store, logger, '需要登录', str(exc))
+                requested = flow.request_login(desired, str(exc))
                 await browser.pause_media()
-                if config['headless']:
+                if requested and config['headless'] and not headed:
+                    store.set('force_headed', True)
                     # 退出后守护进程会以可见窗口重新打开；不在无头模式无限等待扫码。
                     return
             except Exception as exc:
                 from core.errors import AdaptationRequired, RetryableError
                 if isinstance(exc, AdaptationRequired):
-                    store.set('desired', 'paused')
-                    record(store, logger, '需要适配', str(exc))
+                    if flow.transition(desired, 'paused'):
+                        flow.show('error', str(exc))
+                        record(store, logger, '需要适配', str(exc))
                 elif isinstance(exc, RetryableError):
+                    flow.show('error', '网络暂不可用，正在等待恢复…', desired)
                     record(store, logger, '网络重试', str(exc))
                     for _ in range(20):
                         if store.get('desired') != desired:

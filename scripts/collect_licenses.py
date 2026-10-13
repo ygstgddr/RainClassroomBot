@@ -11,7 +11,7 @@ def collect(destination):
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
     versions = {}
-    for name in ('playwright', 'PyYAML', 'psutil', 'greenlet', 'pyee',
+    for name in ('playwright', 'PyYAML', 'psutil', 'Pillow', 'greenlet', 'pyee',
                  'typing_extensions', 'pyinstaller'):
         distribution = importlib.metadata.distribution(name)
         versions[name] = distribution.version

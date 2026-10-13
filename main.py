@@ -60,8 +60,8 @@ def main():
     args = parser.parse_args()
     config = load_config()
     if args.self_check:
-        import playwright, psutil, tkinter
-        print('配置、Playwright、psutil、Tkinter 导入成功。实站登录及任务完成仍需单独验收。')
+        import playwright, psutil, tkinter, PIL
+        print('配置、Playwright、psutil、Tkinter、Pillow 导入成功。实站登录及任务完成仍需单独验收。')
         return
     demo_dir = tempfile.TemporaryDirectory(prefix='rainclassroom-demo-') if args.demo else None
     if demo_dir:
