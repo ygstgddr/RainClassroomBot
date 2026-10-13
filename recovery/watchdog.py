@@ -1,6 +1,8 @@
 import multiprocessing as mp
 import threading
 import time
+import uuid
+from queue import Full
 from collections import deque
 import psutil
 from core.logging_setup import make_logger, record
@@ -38,6 +40,34 @@ class Watchdog(threading.Thread):
         self.owned = {}
         self.restarts = deque()
         self.worker_target = worker_target
+        # 用户输入文本只经过易失的进程队列，不写数据库/文件/日志。
+        # 每次启动换一条队列和 generation，重启不会重放旧文字。
+        self.typing_queue = None
+        self.typing_generation = ''
+        self.typing_lock = threading.Lock()
+
+    def submit_typing(self, command):
+        with self.typing_lock:
+            if (self.stop_event.is_set() or self.typing_queue is None or not self.process
+                    or not self.process.is_alive()
+                    or command.get('generation') != self.typing_generation):
+                return False
+            try:
+                self.typing_queue.put_nowait(command)
+                return True
+            except (Full, ValueError, OSError):
+                return False
+
+    def _discard_typing(self):
+        with self.typing_lock:
+            queue, self.typing_queue = self.typing_queue, None
+            self.typing_generation = ''
+            if queue is not None:
+                # 不 join feeder：退出或崩溃时旧消息必须丢弃，不能挂住桌面关闭。
+                queue.cancel_join_thread()
+                queue.close()
+        self.store.set('typing_status', {'phase': 'idle', 'target': None, 'sent': 0,
+                                        'total': 0, 'speed': 20, 'message': '请重新指定网页输入框'})
 
     def remember_children(self):
         if not self.process:
@@ -50,6 +80,7 @@ class Watchdog(threading.Thread):
             pass
 
     def cleanup(self):
+        self._discard_typing()
         self.remember_children()
         kill_owned(self.owned)
         if self.process:
@@ -63,7 +94,16 @@ class Watchdog(threading.Thread):
         now = time.time()
         self.store.set('heartbeat', now)
         self.store.set('page_heartbeat', now)
-        self.process = mp.get_context('spawn').Process(target=self.worker_target, args=(self.config,), daemon=False)
+        context = mp.get_context('spawn')
+        with self.typing_lock:
+            self.typing_queue = context.Queue(maxsize=16)
+            self.typing_generation = uuid.uuid4().hex
+            worker_config = dict(self.config, typing_commands=self.typing_queue,
+                                 typing_generation=self.typing_generation)
+        self.store.set('typing_status', {'phase': 'idle', 'target': None, 'sent': 0,
+            'total': 0, 'speed': 20, 'generation': self.typing_generation,
+            'message': '请先指定受管理 Edge 内的输入框'})
+        self.process = context.Process(target=self.worker_target, args=(worker_config,), daemon=False)
         self.process.start()
         self.remember_children()
         self.store.set('worker_pid', self.process.pid)
@@ -79,7 +119,8 @@ class Watchdog(threading.Thread):
                     break
                 dead = not self.process.is_alive()
                 hung = now - self.store.get('heartbeat', now) > self.config['watchdog_timeout_seconds']
-                page_hung = desired in ('catalog', 'scan', 'run') and now - self.store.get('page_heartbeat', now) > self.config['watchdog_timeout_seconds']
+                typing_active = self.store.get('typing_status', {}).get('phase') in ('selecting', 'ready', 'running', 'paused')
+                page_hung = (desired in ('catalog', 'scan', 'run') or typing_active) and now - self.store.get('page_heartbeat', now) > self.config['watchdog_timeout_seconds']
                 if not (dead or hung or page_hung):
                     continue
                 self.cleanup()

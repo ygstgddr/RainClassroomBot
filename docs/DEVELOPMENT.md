@@ -2,7 +2,7 @@
 
 ## 开发环境
 
-0.6.0 的验证环境是 Windows 11 x64、Python 3.12.10、Microsoft Edge 和已安装的 Microsoft Edge WebView2 Runtime。推荐独立虚拟环境，运行路径使用项目根目录。缺少 WebView2 时先从 [Microsoft 官方页面](https://developer.microsoft.com/en-us/microsoft-edge/webview2/consumer/)安装 Evergreen WebView2 Runtime。
+0.7.0 的验证环境是 Windows 11 x64、Python 3.12.10、Microsoft Edge 和已安装的 Microsoft Edge WebView2 Runtime。推荐独立虚拟环境，运行路径使用项目根目录。缺少 WebView2 时先从 [Microsoft 官方页面](https://developer.microsoft.com/en-us/microsoft-edge/webview2/consumer/)安装 Evergreen WebView2 Runtime。
 
 ```powershell
 py -3.12 -m venv .venv
@@ -14,7 +14,7 @@ py -3.12 -m venv .venv
 
 测试含真实 Edge、本地 HTTP 模拟站和桌面 GUI 检查，因此需要能启动图形界面的 Windows 会话。模拟测试不需要真实雨课堂账号。
 
-默认桌面使用 `pywebview==6.2.1`，指定 `edgechromium` 渲染器。课程、任务、日志和设置均由本地 HTML/CSS/JavaScript 渲染：半透明背景结合 `backdrop-filter`，使彩色背景透过各面板；CSS 负责悬停、按压、页面过渡与勾选动画，并支持 `prefers-reduced-motion`。
+默认桌面使用 `pywebview==6.2.1`，指定 `edgechromium` 渲染器。课程、任务、日志、其他功能和设置均由本地 HTML/CSS/JavaScript 渲染：半透明背景结合 `backdrop-filter`，使彩色背景透过各面板；CSS 负责悬停、按压、页面过渡与勾选动画，并支持 `prefers-reduced-motion`。0.7.0 的课程名称采用 18px，日期和状态采用 12px，提升对比度并允许名称完整换行。
 
 `gui/web_assets.py` 将可信的 HTML/CSS/JavaScript 内联后交给窗口加载，界面不依赖 CDN，也不把源码、登录目录或数据库所在目录公开为静态 HTTP 目录。`window.expose` 只暴露 `snapshot()` 与 `action()` 两个桥接接口，不把整个控制器或 Store 暴露给 JavaScript。
 
@@ -35,6 +35,7 @@ RainClassroomBot/
 ├── browser/
 │   ├── edge_manager.py      # 持久化 Edge 生命周期
 │   ├── site_adapter.py      # 课程、任务、进度与页面入口适配
+│   ├── manual_typing.py     # 原始元素绑定、逐字输入、焦点及导航保护
 │   └── visibility.py        # 验证框实际可见性
 ├── core/                    # 配置、数据存储、课程、类型、站点与日志
 ├── task/                    # 扫描、调度、执行
@@ -56,11 +57,37 @@ RainClassroomBot/
 └── build.ps1                # 测试并构建 Windows onedir 包
 ```
 
-GUI 与浏览器工作进程分离，通过本地 SQLite 交换状态和操作意图；SQLite 保存账号、课程选择、任务、尝试次数及完成证据。守护监控心跳并限制重启频率。多站点使用独立运行目录。
+GUI 与浏览器工作进程分离，通过本地 SQLite 交换学习状态和操作意图；SQLite 保存账号、课程选择、任务、尝试次数及完成证据。手动打字的正文使用当前工作进程专属的内存队列传递，SQLite 仅保存目标摘要、阶段与计数。守护监控心跳并限制重启频率。多站点使用独立运行目录。
 
 WebView 的桥接调用可能并发到达，动作通过锁串行检查选课范围与当前状态；快照在一次读取事务中获取账号、目录、所选任务与日志，再转换为前端字段白名单。切站、恢复和退出使用后台线程，等待守护退出时不持有界面操作锁。必须先退出旧工作进程，再创建新站工作进程；中途关闭、写配置失败或新守护启动失败都需清理新进程并保持可恢复状态。
 
 修改交互流程时，请使用临时 Store 和虚构课程进行界面测试，并验证开始、暂停、继续、改选课程、扫描失败和切站状态。工作进程尚未停止时，不得允许更改当前执行范围。主按钮发出操作意图，是否需要扫描由工作进程根据当前账号和选课范围判断；不要在 GUI 的定时刷新中绕过扫描直接执行任务。
+
+## 指定文本框打字的实现与约束
+
+`browser/manual_typing.py` 的 `ManualTyping` 只使用本助手的 `EdgeManager.context`。选择模式在受管理网页及其 iframe 中安装临时标记，用户点击可编辑文本框后保留原 `ElementHandle`；后续输入不会用相同 selector 搜索另一个元素。工具支持普通单行输入框、`textarea` 与 `contenteditable`，拒绝密码、文件、只读和不可见元素。
+
+前端确认目标只保存当前 token；直到 `typing_start` 才通过桥接发送 `{token, text, speed, confirmed: true}`。`worker.py` 的 `TypingCommands` 在 Playwright 所在 asyncio 循环内消费动作，状态回调只持久化白名单摘要。`recovery/watchdog.py` 为每次工作进程启动创建新 `multiprocessing.Queue` 和 generation；重启、切站或退出会关闭旧队列，旧正文和命令不重新播放。不得把输入正文加入日志、异常全文、SQLite、配置或前端 `localStorage`。
+
+快照的 `typing` 字段包含 `phase`、`available`、`connected`、`target`、`sent`、`total`、`speed`、`message` 与可用动作标志。target 仅含 token、label、URL/iframe 来源、tag/type、字符数量与 multiline，不包含现有全文。允许动作如下：
+
+| 动作 | 参数 / 行为 |
+|---|---|
+| `typing_select` | 进入现场点选；只有学习操作停止后可用 |
+| `typing_cancel` | 取消选择并清除目标 |
+| `typing_start` | `token`、`text`、`speed`、`confirmed: true`；再次检查目标与正文 |
+| `typing_pause` | 暂停，保留同一目标和尚未输出的内存文字 |
+| `typing_resume` | 必须携带同一 `token`；向原目标继续 |
+| `typing_speed` | `speed`，范围 1～60 字符/秒，默认 20 |
+| `typing_stop` | 停止并释放正文、目标与临时页面监听器 |
+
+每次正文上限 50,000 字符，不裁掉首尾空格。引擎将 CRLF/CR 规范化为 LF；单行目标拒绝换行，控制字符与制表符不接受。输入使用浏览器逐字符键盘/文本事件；中文与换行通过 `insert_text` 发送输入事件，不走剪贴板，也不直接修改网页 `value` 或编辑器内部状态。换行不按 Enter，工具不自动提交表单。
+
+每个字符前后检查目标身份、可编辑性与焦点，并安装页面事件护栏，避免焦点在异步调用期间跳到另一个框。失焦暂停；导航、原元素替换或浏览器断开停止并清除目标。暂停和继续不得重复已接受的字符。选择及输出期间锁定学习开始与扫描；切站、关闭则先结束旧工作进程的输入，再建立新站点连接。
+
+状态变化即时发布，连续进度更新节流，避免每个字符都写入 SQLite。输入节奏使用异步等待，空闲时不做全局键盘监测或持续截图。暂停/停止先改变控制状态，再等待当前已在途的字符输入请求完成，以避免遗留输入；普通页面控制快速，网页脚本阻塞时不能承诺立即返回。不要用取消 RPC 后无条件重试字符来换取表面的即时停止。
+
+修改此模块后，用本地真实 Edge 页面覆盖目标确认、多个输入框、iframe、焦点变化、DOM 替换、导航、暂停继续、停止、速度边界、换行和重启丢弃；验证未指定框没有收到输入，正文没有进入状态快照或持久文件。`--demo` 只模拟工具状态与计数，不会输入真实网页。本次没有对真实作业写入答案，具体测试结果见 [VALIDATION.md](../VALIDATION.md)。
 
 ## 修改适配逻辑
 

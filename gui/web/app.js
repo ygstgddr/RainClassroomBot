@@ -4,10 +4,10 @@
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
-  const pageNames = { courses: '我的课程', tasks: '任务队列', activity: '运行记录' };
+  const pageNames = { courses: '我的课程', tasks: '任务队列', activity: '运行记录', tools: '其他功能' };
   const stateNames = { pending: '等待处理', running: '进行中', completed: '服务器已确认', manual: '人工处理', locked: '尚未开放', needs_adapter: '待适配', failed: '需要重试' };
   const typeNames = { video: '视频观看', article: '图文阅读', slides: 'PPT / 课件', homework: '作业提交', exam: '测试 / 考试', quiz: '测验', manual: '其他任务' };
-  const ui = { page: 'courses', courseFilter: 'all', courseSearch: '', taskSearch: '', taskType: 'all', unfinishedOnly: true, activityTab: 'logs', pending: false, connected: false, snapshot: null, modalReturnFocus: null, navigationToken: 0 };
+  const ui = { page: 'courses', courseFilter: 'all', courseSearch: '', taskSearch: '', taskType: 'all', unfinishedOnly: true, activityTab: 'logs', pending: false, connected: false, snapshot: null, modalReturnFocus: null, navigationToken: 0, confirmedTarget: '', typingTarget: '', typingSpeedDirty: false };
   const courseNodes = new Map();
   const taskNodes = new Map();
   const fingerprints = { courses: '', tasks: '', activity: '', history: '' };
@@ -30,7 +30,8 @@
     return { ...raw, version: asText(raw.version), site: raw.site || {}, account: raw.account || {},
       state: { phase: 'idle', busy: false, message: '', primary: { label: '连接学习账号', action: 'load_courses', enabled: false }, ...(raw.state || {}) },
       counts: { courses: list('courses').length, selected: list('courses').filter((c) => c.selected).length, tasks: list('tasks').length, completed: 0, pending: 0, errors: list('scan_errors').length, ...(raw.counts || {}) },
-      progress: raw.progress || {}, courses: list('courses'), tasks: list('tasks'), logs: list('logs'), scan_errors: list('scan_errors'), current: raw.current || {}, filters: raw.filters || {}, empty: raw.empty || {} };
+      progress: raw.progress || {}, courses: list('courses'), tasks: list('tasks'), logs: list('logs'), scan_errors: list('scan_errors'), current: raw.current || {}, filters: raw.filters || {}, empty: raw.empty || {},
+      typing: { phase: 'idle', available: false, sent: 0, total: 0, speed: 20, message: '', ...(raw.typing || {}) } };
   }
 
   function applySnapshot(raw) {
@@ -49,6 +50,7 @@
     renderCourses();
     renderTasks();
     renderActivity();
+    renderTools();
     syncDisabled();
   }
 
@@ -262,6 +264,115 @@
     container.replaceChildren(...children); container.dataset.fingerprint = hash;
   }
 
+  const typingActive = () => Boolean(ui.snapshot && ['selecting', 'running', 'paused'].includes(ui.snapshot.typing.phase));
+  const learningBusy = () => Boolean(ui.snapshot && (ui.snapshot.typing.learning_busy ?? ['running', 'scanning', 'loading_courses', 'login_required', 'switching', 'pausing', 'closing'].includes(ui.snapshot.state.phase)));
+  const sourceLength = () => Array.from($('typing-source').value).length;
+  function typingTargetMultiline(target) {
+    if (!target) return true;
+    if (typeof target.multiline === 'boolean') return target.multiline;
+    return target.tag !== 'input' && !['text', 'search', 'email', 'url', 'tel', 'number', 'password', 'input'].includes(target.type);
+  }
+  function updateTypingSource() {
+    const total = sourceLength();
+    setText('typing-character-count', `${total.toLocaleString()} / 50,000 字符`);
+    const target = ui.snapshot ? ui.snapshot.typing.target : null;
+    const warning = total > 50000 ? '文字超过 50,000 字符，请缩短原文后再开始。' : target && !typingTargetMultiline(target) && /[\r\n]/.test($('typing-source').value) ? '当前目标为单行文本框，请先去除文字中的换行。' : '';
+    $('typing-multiline-notice').hidden = !warning;
+    setText('typing-multiline-notice', warning);
+    syncTypingControls();
+  }
+  function updateTypingSpeed() {
+    setText('typing-speed-value', $('typing-speed').value);
+    document.querySelectorAll('[data-typing-speed]').forEach((button) => button.classList.toggle('is-active', button.dataset.typingSpeed === $('typing-speed').value));
+  }
+  function renderTools() {
+    const s = ui.snapshot; if (!s) return;
+    const t = s.typing, phase = t.phase, target = t.target && typeof t.target === 'object' ? t.target : null;
+    const token = target ? asText(target.token) : '';
+    // Confirmation belongs to a single browser/frame/DOM target. A newer
+    // target or an interrupted run can never inherit earlier consent.
+    if (token !== ui.typingTarget || ['idle', 'selecting', 'stopped', 'error', 'completed'].includes(phase)) ui.confirmedTarget = '';
+    ui.typingTarget = token;
+    const confirmed = Boolean(token && ui.confirmedTarget === token);
+    const labels = { idle: '等待选择目标', selecting: '请在网页中选择', ready: confirmed ? '目标已确认' : '请确认目标', running: '正在输出', paused: '输出已暂停', completed: '输出完成', stopped: '输出已停止', error: '需要重新选择' };
+    setText('typing-state-label', labels[phase] || '等待选择目标');
+    $('typing-state-label').className = 'typing-state-pill' + (phase === 'running' ? ' is-running' : phase === 'error' ? ' is-error' : phase === 'completed' ? ' is-completed' : '');
+    const tag = target ? asText(target.tag || '') : '', type = target ? asText(target.type || '') : '';
+    const kind = !target ? '先选择，再确认' : target.multiline === true || tag === 'textarea' || type === 'textarea' ? '多行文本框' : type === 'contenteditable' || tag === 'contenteditable' ? '富文本编辑框' : typingTargetMultiline(target) ? '网页编辑框' : '单行文本框';
+    setText('typing-target-title', target ? target.label || '已选网页文本框' : '尚未指定文本框');
+    setText('typing-target-kind', kind);
+    setText('typing-target-page', target ? target.page_title || target.host || target.url || '当前学习网页' : '');
+    setText('typing-target-url', target ? target.url || target.host || '网页地址未提供' : '');
+    setText('typing-target-description', target ? [target.description || target.label || '已选文本框', target.frame ? '框架：' + asText(target.frame) : '', Number.isFinite(Number(target.characters)) ? `已有 ${number(target.characters)} 字符，将从末尾追加` : '将从末尾追加'].filter(Boolean).join(' · ') : '');
+    $('typing-target-details').hidden = !target;
+    $('typing-target-confirmed').hidden = !confirmed;
+    $('typing-target-card').classList.toggle('is-confirmed', confirmed);
+    const guidance = phase === 'selecting' ? '请切换到学习浏览器，点击指定文本框。选中后回来核对目标，也可以取消。' : phase === 'running' ? '正在向此文本框追加文字。可以调整速度、暂停或停止。' : phase === 'paused' ? '输出已暂停，继续时会核对同一个文本框和已输入内容。' : target ? confirmed ? '目标已锁定。核对原文和速度后，点击“开始输出”。' : '请核对网页地址和文本框名称，再点击“确认这个文本框”。' : ['stopped', 'error', 'completed'].includes(phase) ? '重新选择网页文本框，确认后才能再次输出。' : '点击“选择网页文本框”，然后在学习浏览器中点击你要输入的那个框。';
+    setText('typing-target-guidance', guidance);
+    const sent = Math.max(0, number(t.sent)), total = Math.max(0, number(t.total)), percent = total ? clamp(sent / total * 100) : 0;
+    setText('typing-progress-count', `${sent.toLocaleString()} / ${total.toLocaleString()} 字符`);
+    const remaining = Number.isFinite(Number(t.remaining_seconds)) ? Math.ceil(number(t.remaining_seconds)) : Math.ceil(Math.max(0, total - sent) / Math.max(1, number(t.speed, 20)));
+    setText('typing-progress-remaining', phase === 'running' ? `约剩 ${remaining} 秒` : phase === 'paused' ? '已暂停 · 可继续' : phase === 'completed' ? '已完成 · 请在网页核对' : phase === 'selecting' ? '等待选择' : '等待开始');
+    $('typing-progress-fill').style.width = percent + '%';
+    $('typing-output-progress').setAttribute('role', 'progressbar');
+    $('typing-output-progress').setAttribute('aria-valuemin', '0'); $('typing-output-progress').setAttribute('aria-valuemax', '100');
+    $('typing-output-progress').setAttribute('aria-valuenow', String(Math.round(percent)));
+    const defaultMessage = !t.available ? '打开学习浏览器并登录后，即可使用此工具。' : '选择并确认目标后，即可开始。';
+    setText('typing-message', t.message || defaultMessage);
+    const error = asText(t.error || (phase === 'error' ? t.message : ''));
+    $('typing-error').hidden = !error; setText('typing-error', error);
+    $('typing-busy-notice').hidden = !learningBusy();
+    if (!ui.typingSpeedDirty && document.activeElement !== $('typing-speed')) { $('typing-speed').value = String(clamp(t.speed, 1, 60)); updateTypingSpeed(); }
+    $('typing-step-pick').classList.toggle('is-active', !target);
+    $('typing-step-pick').classList.toggle('is-done', Boolean(target));
+    $('typing-step-confirm').classList.toggle('is-active', Boolean(target && !confirmed && phase === 'ready'));
+    $('typing-step-confirm').classList.toggle('is-done', confirmed || ['running', 'paused'].includes(phase));
+    $('typing-step-start').classList.toggle('is-active', confirmed || ['running', 'paused'].includes(phase));
+    updateTypingSource();
+  }
+  function syncTypingControls() {
+    const s = ui.snapshot, t = s ? s.typing : { phase: 'idle', available: false }, phase = t.phase;
+    const target = t.target, token = target ? asText(target.token) : '', confirmed = Boolean(token && ui.confirmedTarget === token);
+    const active = ['running', 'paused'].includes(phase), selecting = phase === 'selecting', blocked = learningBusy() || ui.pending || !ui.connected;
+    const canSelect = t.can_select ?? (t.available && !active && !selecting);
+    const sourceOK = sourceLength() > 0 && sourceLength() <= 50000 && (!target || typingTargetMultiline(target) || !/[\r\n]/.test($('typing-source').value));
+    $('typing-pick').hidden = selecting || active;
+    $('typing-pick').disabled = blocked || !canSelect;
+    $('typing-pick').lastChild.textContent = target ? '重新选择文本框' : '选择网页文本框';
+    $('typing-cancel-pick').hidden = !selecting; $('typing-cancel-pick').disabled = ui.pending;
+    $('typing-confirm').hidden = phase !== 'ready' || !token || confirmed; $('typing-confirm').disabled = blocked;
+    $('typing-start').hidden = active || selecting;
+    $('typing-start').disabled = blocked || !t.available || phase !== 'ready' || !confirmed || !sourceOK || t.can_start === false;
+    $('typing-pause').hidden = phase !== 'running'; $('typing-pause').disabled = ui.pending || t.can_pause === false;
+    $('typing-resume').hidden = phase !== 'paused'; $('typing-resume').disabled = ui.pending || !token || t.can_resume === false;
+    $('typing-stop').hidden = !active; $('typing-stop').disabled = ui.pending || t.can_stop === false;
+    $('typing-source').readOnly = active;
+    $('typing-clear-source').disabled = active || !sourceLength();
+    $('typing-speed').disabled = !t.available || selecting || ui.pending;
+    document.querySelectorAll('[data-typing-speed]').forEach((button) => { button.disabled = $('typing-speed').disabled; });
+    document.querySelector('[data-action="typing_pause_learning"]').disabled = ui.pending || !s || ['pausing', 'switching', 'closing'].includes(s.state.phase);
+  }
+
+  async function handleTypingAction(action) {
+    const t = ui.snapshot ? ui.snapshot.typing : {}, target = t.target || {}, token = asText(target.token);
+    if (action === 'typing_clear_source') { if (!['running', 'paused'].includes(t.phase)) { $('typing-source').value = ''; updateTypingSource(); } return; }
+    if (action === 'typing_confirm') { if (t.phase === 'ready' && token && !learningBusy()) { ui.confirmedTarget = token; renderTools(); } return; }
+    if (action === 'typing_pause_learning') { await sendAction('primary'); return; }
+    if (action === 'typing_pick') { ui.confirmedTarget = ''; await sendAction('typing_select'); return; }
+    if (action === 'typing_cancel_pick') { ui.confirmedTarget = ''; await sendAction('typing_cancel'); return; }
+    if (action === 'typing_start') {
+      if (t.phase !== 'ready' || !token || ui.confirmedTarget !== token || learningBusy()) { showToast('请先选择并确认指定文本框。', true); return; }
+      const text = $('typing-source').value;
+      if (!text || sourceLength() > 50000) { showToast('请输入 1–50,000 字符的文字。', true); return; }
+      if (!typingTargetMultiline(target) && /[\r\n]/.test(text)) { showToast('单行文本框不支持换行，请修改原文。', true); return; }
+      ui.typingSpeedDirty = false;
+      await sendAction('typing_start', { token, text, speed: number($('typing-speed').value, 20), confirmed: true }); return;
+    }
+    if (action === 'typing_resume') { if (t.phase === 'paused' && token) await sendAction('typing_resume', { token }); return; }
+    if (action === 'typing_stop') { ui.confirmedTarget = ''; await sendAction('typing_stop'); return; }
+    if (action === 'typing_pause') await sendAction('typing_pause');
+  }
+
   function syncDisabled() {
     const s = ui.snapshot, busy = locked();
     $('primary-button').disabled = ui.pending || !s || !s.state.primary || !s.state.primary.enabled;
@@ -280,6 +391,8 @@
     $('site-url').disabled = busy;
     document.querySelectorAll('.site-history button').forEach((button) => { button.disabled = busy; });
     if (!$('settings-overlay').hidden && busy) setText('site-error', '请先暂停任务，等待当前操作停止后切换站点。');
+    if (typingActive()) $('primary-button').disabled = true;
+    syncTypingControls();
   }
 
   function navigate(page) {
@@ -290,7 +403,9 @@
     // Materialize their latest display data only when the user opens them.
     if (page === 'courses') renderCourses();
     else if (page === 'tasks') renderTasks();
-    else renderActivity();
+    else if (page === 'activity') renderActivity();
+    else renderTools();
+    document.body.classList.toggle('tools-page-active', page === 'tools');
     syncDisabled();
     document.querySelectorAll('[data-page]').forEach((button) => { const active = button.dataset.page === page; button.classList.toggle('is-active', active); if (active) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current'); });
     setText('page-breadcrumb', pageNames[page]);
@@ -353,6 +468,7 @@
   }
 
   async function handleAction(action, target) {
+    if (action.startsWith('typing_')) { await handleTypingAction(action); return; }
     if (action === 'settings') { openSettings(); return; }
     if (action === 'close_settings') { closeSettings(); return; }
     if (action === 'navigate_courses') { navigate('courses'); return; }
@@ -363,6 +479,8 @@
   }
 
   document.addEventListener('click', (event) => {
+    const speedPreset = event.target.closest('[data-typing-speed]');
+    if (speedPreset && !speedPreset.disabled) { $('typing-speed').value = speedPreset.dataset.typingSpeed; ui.typingSpeedDirty = true; updateTypingSpeed(); if (ui.snapshot && ['running', 'paused'].includes(ui.snapshot.typing.phase)) sendAction('typing_speed', { speed: number($('typing-speed').value, 20) }); return; }
     const course = event.target.closest('.course-card');
     if (course && !course.disabled && ui.snapshot) { const entry = ui.snapshot.courses.find((c) => asText(c.id) === course.dataset.id); if (entry) sendAction('select_course', { id: course.dataset.id, selected: !entry.selected }); return; }
     const page = event.target.closest('[data-page]'); if (page) { navigate(page.dataset.page); return; }
@@ -380,11 +498,24 @@
   document.querySelector('.brand').addEventListener('click', (event) => { event.preventDefault(); navigate('courses'); });
   $('course-search').addEventListener('input', (event) => { ui.courseSearch = event.target.value; renderCourses(); });
   $('task-search').addEventListener('input', (event) => { ui.taskSearch = event.target.value; renderTasks(); });
+  $('typing-source').addEventListener('input', updateTypingSource);
+  $('typing-speed').addEventListener('input', () => { ui.typingSpeedDirty = true; updateTypingSpeed(); });
+  $('typing-speed').addEventListener('change', () => { if (ui.snapshot && ['running', 'paused'].includes(ui.snapshot.typing.phase)) sendAction('typing_speed', { speed: number($('typing-speed').value, 20) }); });
   const taskFilterChanged = () => { ui.taskType = $('task-type').value; ui.unfinishedOnly = $('unfinished-only').checked; renderTasks(); if (ui.connected && !ui.pending) sendAction('task_filter', { type: ui.taskType, unfinished_only: ui.unfinishedOnly }); };
   $('task-type').addEventListener('change', taskFilterChanged); $('unfinished-only').addEventListener('change', taskFilterChanged);
   $('site-form').addEventListener('submit', (event) => { event.preventDefault(); if (locked()) return; const url = $('site-url').value.trim(); if (!url) { setText('site-error', '请输入学校使用的雨课堂主页地址。'); return; } sendAction('switch_site', { url }); });
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') { if (!$('settings-overlay').hidden) closeSettings(); else closeMenu(); }
+    if (event.key === 'Escape') {
+      // Close a foreground layer first. Escape never edits or clears the local
+      // draft, and only active typing operations receive the stop shortcut.
+      if (!$('settings-overlay').hidden) { event.preventDefault(); closeSettings(); return; }
+      if (!$('more-menu').hidden) { event.preventDefault(); closeMenu(); return; }
+      if (ui.page === 'tools' && ui.snapshot) {
+        const phase = ui.snapshot.typing.phase;
+        if (phase === 'selecting') { event.preventDefault(); handleTypingAction('typing_cancel_pick'); return; }
+        if (['running', 'paused'].includes(phase)) { event.preventDefault(); handleTypingAction('typing_stop'); return; }
+      }
+    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); if (ui.page === 'courses') $('course-search').focus(); else if (ui.page === 'tasks') $('task-search').focus(); }
     // Keep modal keyboard navigation inside its dialog; restore focus on close.
     if (event.key === 'Tab' && !$('settings-overlay').hidden) {
@@ -436,9 +567,10 @@
       { id: 'demo-t4', course_name: '艺术鉴赏与生活美学', title: '如何欣赏一幅画', type: 'video', type_label: '视频观看', status: 'completed', status_label: '服务器已确认', progress: 1 },
       { id: 'demo-t5', course_name: '大学英语（三）', title: 'Unit 3 · 课堂作业', type: 'manual', type_label: '作业提交', status: 'manual', status_label: '人工处理', progress: null },
     ];
-    return { demo: true, version: '0.6.0', site: { label: '长江雨课堂', url: 'https://changjiang.yuketang.cn/web', history: [{ label: '雨课堂', url: 'https://www.yuketang.cn/v2/web' }, { label: '长江雨课堂', url: 'https://changjiang.yuketang.cn/web' }] }, account: { name: '演示同学', logged_in: true }, state: { phase: 'idle', busy: false, selection_locked: false, message: '课程选择已保存。直接点击开始，自动扫描并安排学习任务。', primary: { label: '开始学习', action: 'start', enabled: true } }, counts: { courses: courses.length, selected: 3, tasks: tasks.length, completed: 1, pending: 3, errors: 0 }, courses, tasks, logs: [{ time: '10-13 15:24:12', level: '服务器已确认', course: '艺术鉴赏与生活美学', task: '如何欣赏一幅画', message: '任务完成状态已同步。' }, { time: '10-13 15:23:48', level: '扫描完成', message: '所选课程任务已加入队列。' }], scan_errors: [], progress: { current: 1, total: 5, percent: 20, label: '学习进度' }, filters: { task_type: 'all', unfinished_only: true } };
+    return { demo: true, version: '0.7.0', site: { label: '长江雨课堂', url: 'https://changjiang.yuketang.cn/web', history: [{ label: '雨课堂', url: 'https://www.yuketang.cn/v2/web' }, { label: '长江雨课堂', url: 'https://changjiang.yuketang.cn/web' }] }, account: { name: '演示同学', logged_in: true }, state: { phase: 'idle', busy: false, selection_locked: false, message: '课程选择已保存。直接点击开始，自动扫描并安排学习任务。', primary: { label: '开始学习', action: 'start', enabled: true } }, counts: { courses: courses.length, selected: 3, tasks: tasks.length, completed: 1, pending: 3, errors: 0 }, courses, tasks, logs: [{ time: '10-13 15:24:12', level: '服务器已确认', course: '艺术鉴赏与生活美学', task: '如何欣赏一幅画', message: '任务完成状态已同步。' }, { time: '10-13 15:23:48', level: '扫描完成', message: '所选课程任务已加入队列。' }], scan_errors: [], progress: { current: 1, total: 5, percent: 20, label: '学习进度' }, filters: { task_type: 'all', unfinished_only: true } };
   }
   async function demoAction(name, payload) {
+    if (name.startsWith('typing_')) return { ok: false, message: '演示工具不会向网页输出。请在正式程序中选择真实目标。' };
     const s = normalize(ui.snapshot || demoSnapshot());
     if (name === 'select_course') s.courses = s.courses.map((course) => asText(course.id) === payload.id ? { ...course, selected: payload.selected } : course);
     if (name === 'select_courses') s.courses = s.courses.map((course) => ({ ...course, selected: payload.mode === 'all' || payload.mode === 'current' && course.current }));

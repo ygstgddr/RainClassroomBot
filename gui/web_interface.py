@@ -12,6 +12,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from collections import Counter
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -25,6 +26,8 @@ from core.task_types import AUTOMATED_KINDS, type_label
 STATES = {'pending': '待处理', 'running': '进行中', 'completed': '服务器已确认',
           'manual': '需手动完成', 'locked': '未开放', 'needs_adapter': '需要适配', 'failed': '失败'}
 ACTIVE = frozenset(('run', 'scan', 'catalog', 'login'))
+TYPING_ACTIVE = frozenset(('selecting', 'ready', 'running', 'paused'))
+TYPING_PHASES = TYPING_ACTIVE | frozenset(('idle', 'completed', 'stopped', 'error'))
 
 
 def _text(value, limit=700):
@@ -70,6 +73,7 @@ class WebInterface:
         self._notice_until = 0.0
         self._changed = time.time()
         self._filters = {'task_type': 'all', 'unfinished_only': True}
+        self._typing_pending = None
         version = app_root() / 'VERSION.txt'
         self.version = version.read_text(encoding='utf8').strip() if version.exists() else ''
 
@@ -86,7 +90,48 @@ class WebInterface:
 
     def _busy(self):
         return (self.switching or self.closing or self.store.get('worker_busy', False)
-                or self.store.get('desired', 'idle') in ACTIVE)
+                or self.store.get('desired', 'idle') in ACTIVE or self._typing_locked())
+
+    def _typing_locked(self):
+        state = self.store.get('typing_status', {})
+        return state.get('phase') in TYPING_ACTIVE or self._pending_typing(state)
+
+    def _pending_typing(self, state):
+        pending = self._typing_pending
+        if pending and (state.get('request_id') == pending['request_id']
+                        or state.get('generation') != pending['generation'] or not self._alive()):
+            self._typing_pending = None
+        return bool(self._typing_pending)
+
+    def _typing_view(self, state, desired, worker_busy):
+        """Display-only typing state; never return the user's source text."""
+        state = state if isinstance(state, dict) else {}
+        phase = state.get('phase') if state.get('phase') in TYPING_PHASES else 'idle'
+        pending = self._pending_typing(state)
+        target = state.get('target')
+        public_target = None
+        if isinstance(target, dict) and isinstance(target.get('token'), str):
+            public_target = {key: _text(target.get(key), 250) for key in
+                ('token', 'label', 'url', 'frame', 'tag', 'type')}
+            public_target['characters'] = max(0, int(_number(target.get('characters'), 0)))
+            public_target['multiline'] = bool(target.get('multiline', target.get('tag') != 'input'))
+        available = self.demo or bool(self._alive() and self.watchdog
+            and callable(getattr(self.watchdog, 'submit_typing', None)) and state.get('connected'))
+        quiet = not (self.switching or self.closing or worker_busy or desired in ACTIVE)
+        enabled = available and quiet
+        if pending and phase not in TYPING_ACTIVE:
+            phase = 'selecting'  # 命令已提交但 worker 尚未应答时也锁住学习导航。
+        return {'phase': phase, 'available': available, 'connected': available, 'target': public_target,
+            'sent': max(0, int(_number(state.get('sent'), 0))),
+            'total': max(0, int(_number(state.get('total'), 0))),
+            'speed': min(60, max(1, _number(state.get('speed'), 20))),
+            'message': _text(state.get('message') or '先指定网页输入框，再确认开始打字'),
+            'pending': pending, 'learning_busy': not quiet,
+            'can_select': enabled and not pending and phase not in ('running', 'paused'),
+            'can_start': enabled and not pending and phase == 'ready' and bool(public_target),
+            'can_pause': enabled and phase == 'running',
+            'can_resume': enabled and not pending and phase == 'paused' and bool(public_target),
+            'can_stop': available and (phase in TYPING_ACTIVE or pending)}
 
     def _primary(self, desired, worker_busy, account, courses, selected, tasks):
         if self.closing:
@@ -99,6 +144,8 @@ class WebInterface:
             return {'label': '暂停等待' if desired == 'login' else '暂停', 'action': 'pause', 'enabled': True}
         if worker_busy:
             return {'label': '正在暂停…', 'action': 'none', 'enabled': False}
+        if self._typing_locked():
+            return {'label': '请先结束手动打字', 'action': 'none', 'enabled': False}
         if not account.get('id') or not courses:
             return {'label': '连接课程', 'action': 'load_courses', 'enabled': True}
         if not selected:
@@ -131,6 +178,7 @@ class WebInterface:
                 events = [dict(row) for row in db.execute('SELECT * FROM events ORDER BY id DESC LIMIT 80')]
             desired = meta.get('desired', 'idle')
             worker_busy = bool(meta.get('worker_busy', False))
+            typing = self._typing_view(meta.get('typing_status') or {}, desired, worker_busy)
             scan = meta.get('scan_progress') or {}
             workflow = meta.get('workflow') or {}
             current = meta.get('current') or {}
@@ -209,7 +257,7 @@ class WebInterface:
             public_logs = [{'time': time.strftime('%m-%d %H:%M:%S', time.localtime(e['time'])),
                 'level': _text(e.get('status'), 100), 'course': _text(e.get('course'), 160),
                 'task': _text(e.get('task'), 240), 'message': _text(e.get('reason'))} for e in events]
-            busy = self.switching or self.closing or worker_busy or desired in ACTIVE
+            busy = self.switching or self.closing or worker_busy or desired in ACTIVE or typing['phase'] in TYPING_ACTIVE or typing['pending']
             return {'version': self.version, 'demo': self.demo,
                 'site': {'url': self.active_site, 'label': _site_label(self.active_site),
                          'history': [{'url': url, 'label': _site_label(url)} for url in self.history]},
@@ -229,6 +277,7 @@ class WebInterface:
                 'scan_errors': public_errors, 'current': public_current,
                 'workflow': {key: _text(workflow[key]) for key in ('phase', 'message') if key in workflow},
                 'filters': dict(self._filters), 'empty': {'courses': course_empty, 'tasks': task_empty},
+                'typing': typing,
                 'updated_at': max([self._changed, _number(workflow.get('updated'), 0),
                                    *[e['time'] for e in events], *[t['updated'] for t in rows]])}
 
@@ -253,6 +302,8 @@ class WebInterface:
                 return {'ok': False, 'message': f'操作暂未成功（{type(exc).__name__}），请查看运行记录后重试'}
 
     def _action(self, name, payload):
+        if name.startswith('typing_'):
+            return self._typing_action(name, payload)
         if name == 'primary':
             desired = self.store.get('desired', 'idle')
             name = self._primary(desired, self.store.get('worker_busy', False), self.store.get('account', {}),
@@ -288,7 +339,7 @@ class WebInterface:
             self.store.set('desired', 'paused')
             return self._notify('正在暂停，状态会自动保存')
         if self._busy():
-            raise ValueError('请先暂停并等待当前操作停止，再修改课程或重新扫描')
+            raise ValueError('请先暂停并等待当前操作停止；手动打字期间请先停止打字，再开始学习')
         if name in ('select_course', 'course_toggle'):
             cid = str(payload.get('id') or '')
             if cid not in {str(c['classroom_id']) for c in self.store.catalog()}:
@@ -344,6 +395,82 @@ class WebInterface:
                                  else '已开始，会自动扫描所选课程并处理任务'),
                     'navigate': 'courses' if desired == 'catalog' else 'tasks'}
         raise ValueError('未知操作，请刷新界面后重试')
+
+    def _typing_action(self, name, payload):
+        allowed = {'typing_select': set(), 'typing_cancel': set(), 'typing_stop': set(),
+            'typing_pause': set(), 'typing_resume': {'token'}, 'typing_speed': {'speed'},
+            'typing_start': {'token', 'text', 'speed', 'confirmed'}}
+        if name not in allowed or not payload.keys() <= allowed[name]:
+            raise ValueError('手动打字操作参数无效')
+        state = self.store.get('typing_status', {})
+        desired, worker_busy = self.store.get('desired', 'idle'), self.store.get('worker_busy', False)
+        view = self._typing_view(state, desired, worker_busy)
+        if not view['available']:
+            raise ValueError('受管理的 Edge 尚未连接，请先连接课程或恢复浏览器')
+        if name not in ('typing_stop', 'typing_cancel') and (desired in ACTIVE or worker_busy):
+            raise ValueError('请先暂停学习，并等待当前扫描或任务停止后再使用手动打字')
+        if view['pending'] and name not in ('typing_pause', 'typing_stop', 'typing_cancel'):
+            raise ValueError('正在处理上一条打字操作，请稍候')
+        phase, target = view['phase'], view['target']
+        if name == 'typing_select' and phase in ('running', 'paused'):
+            raise ValueError('请先停止当前打字，再重新指定网页输入框')
+        if name == 'typing_start' and phase != 'ready':
+            raise ValueError('请先指定网页输入框并确认目标')
+        if name == 'typing_pause' and phase != 'running':
+            raise ValueError('当前没有正在输出的文字')
+        if name == 'typing_resume' and phase != 'paused':
+            raise ValueError('当前打字未暂停，请重新指定目标')
+        if name in ('typing_start', 'typing_resume'):
+            token = payload.get('token')
+            if (not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,128}', token)
+                    or not target or token != target['token']):
+                raise ValueError('指定输入框已变化，请重新选择并确认')
+            if target.get('type', '').casefold() == 'password':
+                raise ValueError('密码输入框不支持手动打字')
+        if name in ('typing_start', 'typing_speed'):
+            speed = _number(payload.get('speed', 20))
+            if speed is None or not 1 <= speed <= 60:
+                raise ValueError('打字速度必须在每秒 1–60 字之间')
+        if name == 'typing_start':
+            text = payload.get('text')
+            if not isinstance(text, str) or not text or len(text) > 50000:
+                raise ValueError('请输入 1–50000 字的文字')
+            if payload.get('confirmed') is not True:
+                raise ValueError('请核对指定输入框并确认开始打字')
+            if not target.get('multiline') and any(ch in text for ch in '\r\n'):
+                raise ValueError('指定的是单行输入框，不能输出包含换行的文字')
+        if self.demo:
+            return self._demo_typing(name, payload, view)
+        command = dict(payload, action=name, generation=state.get('generation'), request_id=uuid.uuid4().hex)
+        if not self.watchdog.submit_typing(command):
+            raise ValueError('打字连接已变化或操作队列已满，请恢复连接后重新指定输入框')
+        self._typing_pending = {'request_id': command['request_id'], 'generation': command['generation']}
+        messages = {'typing_select': '请在受管理 Edge 中点击指定输入框，按 Esc 可取消',
+            'typing_start': '已确认指定目标，开始模拟逐字输入', 'typing_pause': '正在暂停手动打字',
+            'typing_resume': '继续向原指定输入框输出', 'typing_stop': '正在停止打字并清除目标',
+            'typing_cancel': '正在取消指定输入框', 'typing_speed': '打字速度已更新'}
+        return self._notify(messages[name])
+
+    def _demo_typing(self, name, payload, view):
+        state = {'phase': view['phase'], 'target': view['target'], 'sent': view['sent'],
+                 'total': view['total'], 'speed': view['speed'], 'message': '演示模式，不会向真实网页输出文字'}
+        if name == 'typing_select':
+            state.update(phase='ready', target={'token': uuid.uuid4().hex, 'label': '演示答案输入框',
+                'url': 'https://demo.example', 'frame': 'https://demo.example', 'tag': 'textarea',
+                'type': '', 'multiline': True, 'characters': 0}, sent=0, total=0)
+        elif name == 'typing_start':
+            state.update(phase='completed', sent=len(payload['text']), total=len(payload['text']),
+                         speed=payload.get('speed', 20), target=None)
+        elif name in ('typing_stop', 'typing_cancel'):
+            state.update(phase='stopped', target=None)
+        elif name == 'typing_speed':
+            state['speed'] = payload['speed']
+        elif name == 'typing_pause':
+            state['phase'] = 'paused'
+        elif name == 'typing_resume':
+            state['phase'] = 'running'
+        self.store.set('typing_status', state)
+        return self._notify(state['message'])
 
     def _begin_switch(self, value, recover=False):
         if self.demo or not self.base_config:
