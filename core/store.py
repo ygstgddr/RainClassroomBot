@@ -42,7 +42,11 @@ class Store:
 
     def set(self, key, value):
         with self.db() as db:
-            db.execute('INSERT OR REPLACE INTO meta VALUES(?,?)', (key, json.dumps(value, ensure_ascii=False)))
+            # 使用数据库内的条件比较；多个进程修改控制状态时不能依赖内存缓存。
+            # 无变化的状态不生成 WAL 写入，降低 GUI/守护进程同时轮询时的磁盘负担。
+            db.execute('INSERT INTO meta VALUES(?,?) ON CONFLICT(key) DO UPDATE '
+                       'SET value=excluded.value WHERE meta.value<>excluded.value',
+                       (key, json.dumps(value, ensure_ascii=False)))
 
     def get(self, key, default=None):
         with self.db() as db:
@@ -96,9 +100,16 @@ class Store:
             raise ValueError('未知任务字段')
         if changes.get('state') == 'completed' and not changes.get('evidence'):
             raise ValueError('完成状态必须附带服务器证据')
+        if not changes:
+            return
+        # IS NOT 同时正确处理 NULL，updated 仅在实际字段变化时更新。
+        # 持续播放时 duration 通常不变，不应每次媒体检查都提交一次写事务。
+        conditions = ' OR '.join(k + ' IS NOT ?' for k in changes)
+        compared = tuple(changes.values())
         changes['updated'] = time.time()
         with self.db() as db:
-            db.execute(f"UPDATE tasks SET {','.join(k+'=?' for k in changes)} WHERE key=?", (*changes.values(), key))
+            db.execute(f"UPDATE tasks SET {','.join(k+'=?' for k in changes)} WHERE key=? "
+                       f'AND ({conditions})', (*changes.values(), key, *compared))
 
     def recover(self):
         with self.db() as db:

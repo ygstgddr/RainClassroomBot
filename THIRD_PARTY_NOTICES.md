@@ -1,7 +1,13 @@
 # 第三方组件说明
 
-本程序运行或打包使用 Python、Tcl/Tk、Pillow、Playwright（含其 driver/Node.js 组件）、PyYAML、psutil、greenlet、pyee、typing_extensions，以及 PyInstaller 引导程序。玻璃界面为本项目自行实现，不依赖外部主题框架。
+本程序运行或打包使用 Python、Tcl/Tk、Pillow、Playwright（含其 driver/Node.js 组件）、PyYAML、psutil、greenlet、pyee、typing_extensions，以及 PyInstaller 引导程序。
+
+0.6.0 的默认桌面新增 pywebview 6.2.1，以及其实际安装的 pythonnet、clr_loader、bottle、proxy_tools、cffi、pycparser 等传递依赖。HTML/CSS/JavaScript 玻璃界面由本项目自行实现，不使用外部主题框架或 CDN。
+
+Microsoft Edge 浏览器和 Microsoft Edge WebView2 Runtime 由用户安装，分别用于任务浏览器和桌面渲染，并遵循 Microsoft 附带的许可条款。WebView2 Runtime 下载入口为 [Microsoft 官方页面](https://developer.microsoft.com/en-us/microsoft-edge/webview2/consumer/)；程序 zip 不内嵌完整 WebView2 Runtime。
 
 Windows 发行包的 `third_party_licenses/` 保存从实际构建环境复制的许可证和声明；Playwright 自带声明也保留在其打包目录中。源码运行时请同时遵守所安装依赖附带的许可证。
 
 `scripts/collect_licenses.py` 根据本机安装包元数据收集许可证并记录版本，构建环境变化后应重新执行。这里的第三方声明不替代各组件的完整许可证，也不为本项目源码另外指定许可证。
+
+`proxy_tools` 的旧版 wheel 未附带许可证文件，源码保留其上游许可证副本于 `third_party_licenses/proxy_tools/LICENSE.txt`，打包脚本会一并复制。其他组件的实际构建版本记录在发行包的 `third_party_licenses/versions.json` 中。

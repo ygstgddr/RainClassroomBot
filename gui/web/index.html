@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>雨课堂 · 学习工作台</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <!-- The wallpaper sits behind every translucent panel. No remote assets,
+       fonts, or course-provided HTML are loaded by this desktop interface. -->
+  <div class="wallpaper" aria-hidden="true"><i class="orb orb-blue"></i><i class="orb orb-violet"></i><i class="orb orb-peach"></i><i class="orb orb-mint"></i><div class="grain"></div></div>
+  <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="m4 6 1.5 1.5L8 5M11 6h9M4 12l1.5 1.5L8 11M11 12h9M4 18l1.5 1.5L8 17M11 18h9"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m8 4 8 8-8 8"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7Z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 8a8 8 0 1 0 .2 7M20 3v5h-5"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 5c-3-2-6-2-9-1v15c3-1 6-1 9 1m0-15c3-2 6-2 9-1v15c-3-1-6-1-9 1M12 5v15"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="4"/><path d="m10 8 6 4-6 4Z"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Zm0 0v6h6M8 13h8M8 17h5"/></symbol>
+    <symbol id="i-slides" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M12 17v4m-4 0h8M7 12l3-3 3 3 4-5"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c-5 5-5 13 0 18m0-18c5 5 5 13 0 18"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h5l3 4h6a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="m12 3 10 18H2L12 3Zm0 6v5m0 3v.1"/></symbol>
+    <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3ZM20 2v4m-2-2h4"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></symbol>
+  </defs></svg>
+  <div class="app-shell">
+    <aside class="sidebar glass" aria-label="主导航">
+      <a class="brand" href="#courses" aria-label="雨课堂学习工作台"><span class="brand-mark"><svg class="icon"><use href="#i-book"/></svg></span><span>雨课堂<span class="brand-sub">学习工作台</span></span></a>
+      <p class="nav-caption">工作空间</p>
+      <nav class="navigation">
+        <button class="nav-button is-active" data-page="courses" aria-current="page"><svg class="icon"><use href="#i-grid"/></svg><span>我的课程</span><span id="nav-course-count" class="nav-number">0</span></button>
+        <button class="nav-button" data-page="tasks"><svg class="icon"><use href="#i-list"/></svg><span>任务队列</span><span id="nav-task-count" class="nav-number">0</span></button>
+        <button class="nav-button" data-page="activity"><svg class="icon"><use href="#i-activity"/></svg><span>运行记录</span><span id="nav-error-dot" class="error-dot" hidden></span></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="connection-card"><span class="live-dot" id="connection-dot"></span><div><strong id="connection-title">正在连接工作台</strong><small id="connection-sub">浏览器状态将显示在这里</small></div></div>
+        <button class="nav-button" data-action="settings"><svg class="icon"><use href="#i-settings"/></svg><span>站点与设置</span></button>
+        <div class="account-card"><span class="avatar" id="account-avatar"><svg class="icon"><use href="#i-user"/></svg></span><div><strong id="account-name">尚未登录</strong><small id="account-sub">登录状态保存在本机</small></div><span id="version-label" class="version"></span></div>
+      </div>
+    </aside>
+    <main class="main-content">
+      <header class="topbar"><div class="breadcrumb">你的学习空间 <span>/</span> <strong id="page-breadcrumb">我的课程</strong></div><button id="site-button" class="site-switch glass-button" data-action="settings"><svg class="icon"><use href="#i-globe"/></svg><span id="site-label">雨课堂</span><svg class="icon small"><use href="#i-chevron"/></svg></button></header>
+      <section class="hero glass" aria-label="工作台状态">
+        <div class="hero-copy"><div class="eyebrow"><span class="mini-spark">✦</span> 让每一步，都更轻松</div><h1 id="hero-title">选好课程，即可开始。</h1><p id="hero-description">选择需要处理的课程，工作台会自动扫描并安排任务。</p><div class="hero-meta"><span id="selection-summary">尚未选择课程</span><span class="meta-divider"></span><span class="server-note"><svg class="icon"><use href="#i-shield"/></svg> 完成状态以服务器记录为准</span></div></div>
+        <div class="hero-actions"><button id="primary-button" class="primary-button" disabled><svg class="icon" id="primary-icon"><use href="#i-play"/></svg><span id="primary-label">正在连接</span></button><button class="subtle-button more-trigger" id="more-trigger" aria-haspopup="menu" aria-expanded="false"><svg class="icon"><use href="#i-more"/></svg><span>更多操作</span></button><div id="more-menu" class="menu glass" role="menu" hidden><button data-action="load_courses" role="menuitem"><svg class="icon"><use href="#i-refresh"/></svg>刷新课程</button><button data-action="scan" role="menuitem"><svg class="icon"><use href="#i-search"/></svg>重新扫描任务</button><button data-action="retry_all" role="menuitem"><svg class="icon"><use href="#i-refresh"/></svg>重试失败任务</button><button data-action="open_browser" role="menuitem"><svg class="icon"><use href="#i-globe"/></svg>打开学习浏览器</button><button data-action="open_logs" role="menuitem"><svg class="icon"><use href="#i-folder"/></svg>打开日志文件夹</button></div></div>
+        <div id="workflow-progress" class="workflow-progress" hidden><div class="progress-head"><span id="progress-label"></span><strong id="progress-percent"></strong></div><div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div></div>
+      </section>
+      <div class="metrics" aria-label="学习概况"><div class="metric glass"><span class="metric-icon blue"><svg class="icon"><use href="#i-book"/></svg></span><div><small>已选课程</small><strong><span id="metric-selected">0</span><em id="metric-courses"> / 0</em></strong></div></div><div class="metric glass"><span class="metric-icon violet"><svg class="icon"><use href="#i-list"/></svg></span><div><small>任务总数</small><strong id="metric-tasks">0</strong></div></div><div class="metric glass"><span class="metric-icon green"><svg class="icon"><use href="#i-check"/></svg></span><div><small>服务器已确认</small><strong id="metric-completed">0</strong></div></div><div class="metric glass"><span class="metric-icon amber"><svg class="icon"><use href="#i-clock"/></svg></span><div><small>等待处理</small><strong id="metric-pending">0</strong></div></div></div>
+      <div class="page-host">
+        <section id="page-courses" class="page-panel is-active" aria-labelledby="courses-title"><div class="section-heading"><div><h2 id="courses-title">我的课程 <span id="course-visible-count" class="title-count"></span></h2><p>只处理你选中的课程。课程时间由网站提供。</p></div><div class="section-tools"><button class="icon-button glass-button" data-action="load_courses" aria-label="刷新课程" title="刷新课程"><svg class="icon"><use href="#i-refresh"/></svg></button></div></div><div class="filter-bar glass"><label class="search-field"><svg class="icon"><use href="#i-search"/></svg><input id="course-search" type="search" placeholder="搜索课程名称…" aria-label="搜索课程" autocomplete="off"></label><div class="segmented" id="course-filter" role="group" aria-label="筛选课程"><button class="is-active" data-course-filter="all">全部课程</button><button data-course-filter="current">进行中</button><button data-course-filter="selected">已选择</button></div><div class="filter-actions"><button data-action="select_current" class="text-button">选择进行中</button><button data-action="select_all" class="text-button">全选</button><button data-action="select_clear" class="text-button muted">清空</button></div></div><div id="course-list" class="course-grid"></div><div id="course-empty" class="empty-state glass" hidden></div></section>
+        <section id="page-tasks" class="page-panel" aria-labelledby="tasks-title" hidden><div class="section-heading"><div><h2 id="tasks-title">任务队列 <span id="task-visible-count" class="title-count"></span></h2><p>浏览进度实时更新，服务器确认后才会标记完成。</p></div><button class="glass-button compact-button" data-action="scan"><svg class="icon"><use href="#i-refresh"/></svg>重新扫描</button></div><div class="filter-bar glass"><label class="search-field"><svg class="icon"><use href="#i-search"/></svg><input id="task-search" type="search" placeholder="搜索任务或课程…" aria-label="搜索任务" autocomplete="off"></label><label class="select-field"><span class="sr-only">任务类型</span><select id="task-type"><option value="all">所有类型</option><option value="video">视频观看</option><option value="article">图文阅读</option><option value="slides">PPT / 课件</option><option value="homework">作业提交</option><option value="exam">测试 / 考试</option><option value="manual">其他任务</option></select></label><label class="toggle-label"><input id="unfinished-only" type="checkbox" checked><span class="toggle-track"></span><span>仅看未完成</span></label></div><div id="task-list" class="task-list"></div><div id="task-empty" class="empty-state glass" hidden></div></section>
+        <section id="page-activity" class="page-panel" aria-labelledby="activity-title" hidden><div class="section-heading"><div><h2 id="activity-title">运行记录</h2><p>记录任务进展，及时了解需要处理的问题。</p></div><button class="glass-button compact-button" data-action="open_logs"><svg class="icon"><use href="#i-folder"/></svg>打开日志</button></div><div class="activity-tabs segmented glass" role="group" aria-label="记录类别"><button class="is-active" data-activity-tab="logs">最近记录</button><button data-activity-tab="errors">扫描异常 <span id="error-count">0</span></button></div><div id="activity-list" class="activity-list glass"></div><div id="activity-empty" class="empty-state glass" hidden></div></section>
+      </div>
+      <footer class="app-footer"><span><i class="footer-dot"></i><span id="footer-status">正在准备工作台…</span></span><span id="footer-hint">选课 · 开始 · 轻松管理</span></footer>
+    </main>
+  </div>
+  <div id="settings-overlay" class="modal-overlay" hidden><section class="modal glass" role="dialog" aria-modal="true" aria-labelledby="settings-title"><div class="modal-heading"><span class="modal-icon"><svg class="icon"><use href="#i-globe"/></svg></span><button class="icon-button" data-action="close_settings" aria-label="关闭设置"><svg class="icon"><use href="#i-close"/></svg></button></div><h2 id="settings-title">切换学习站点</h2><p>输入你学校使用的雨课堂主页。每个站点独立保存登录与选课记录。</p><form id="site-form"><label class="form-label" for="site-url">网站地址</label><div class="site-input-row"><input id="site-url" type="url" placeholder="https://changjiang.yuketang.cn/web" required autocomplete="off"><button class="primary-button" id="site-submit" type="submit"><span>切换站点</span><svg class="icon"><use href="#i-arrow"/></svg></button></div><p id="site-error" class="field-error" aria-live="polite"></p></form><div class="form-label">常用站点</div><div id="site-history" class="site-history"></div><div class="settings-note"><svg class="icon"><use href="#i-shield"/></svg><span>登录在独立 Edge 窗口完成，登录数据仅保存在本机。</span></div><div class="modal-footer"><button class="glass-button compact-button" data-action="open_browser"><svg class="icon"><use href="#i-globe"/></svg>打开学习浏览器</button><button class="text-button" data-action="open_logs">查看日志</button></div></section></div>
+  <div id="toast" class="toast glass" role="status" aria-live="polite" hidden><svg class="icon"><use href="#i-check"/></svg><span id="toast-text"></span></div>
+  <script src="app.js"></script>
+</body>
+</html>

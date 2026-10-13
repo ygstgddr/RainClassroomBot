@@ -11,7 +11,8 @@ def collect(destination):
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
     versions = {}
-    for name in ('playwright', 'PyYAML', 'psutil', 'Pillow', 'greenlet', 'pyee',
+    for name in ('playwright', 'PyYAML', 'psutil', 'Pillow', 'pywebview', 'pythonnet',
+                 'clr_loader', 'bottle', 'cffi', 'pycparser', 'greenlet', 'pyee',
                  'typing_extensions', 'pyinstaller'):
         distribution = importlib.metadata.distribution(name)
         versions[name] = distribution.version
@@ -30,6 +31,14 @@ def collect(destination):
         if not copied:
             raise RuntimeError(f'No license found for {name}; inspect build environment')
     python_license = Path(sys.base_prefix) / 'LICENSE.txt'
+    # The legacy proxy_tools wheel omits its license; keep an upstream copy with source.
+    proxy_license = Path(__file__).resolve().parents[1] / 'third_party_licenses/proxy_tools/LICENSE.txt'
+    if not proxy_license.is_file():
+        raise RuntimeError('Bundled proxy_tools LICENSE.txt is missing')
+    proxy_target = destination / 'proxy_tools'
+    proxy_target.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(proxy_license, proxy_target / 'LICENSE.txt')
+    versions['proxy_tools'] = importlib.metadata.version('proxy_tools')
     if not python_license.is_file():
         raise RuntimeError('Python LICENSE.txt not found in base interpreter')
     shutil.copyfile(python_license, destination / 'Python-LICENSE.txt')

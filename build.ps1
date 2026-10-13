@@ -4,7 +4,7 @@ Set-Location -LiteralPath $PSScriptRoot
 if ($LASTEXITCODE -ne 0) { throw 'Build dependencies failed.' }
 & .\.venv\Scripts\python.exe -m pytest -q tests
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed; build stopped.' }
-& .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --windowed --onedir --name RainClassroomBot --collect-all playwright main.py
+& .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --windowed --onedir --name RainClassroomBot --collect-all playwright --collect-all webview --collect-all pythonnet --collect-all clr_loader --hidden-import clr --add-data 'gui/web;gui/web' main.py
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed.' }
 New-Item -ItemType Directory -Path dist\RainClassroomBot\config -Force | Out-Null
 Copy-Item -LiteralPath config\config.yaml -Destination dist\RainClassroomBot\config -Force

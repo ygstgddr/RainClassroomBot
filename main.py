@@ -57,18 +57,18 @@ def main():
     parser = argparse.ArgumentParser(description='雨课堂智能任务管理助手')
     parser.add_argument('--demo', action='store_true', help='使用临时演示数据，不连接雨课堂')
     parser.add_argument('--self-check', action='store_true', help='检查配置和依赖，不打开账号')
+    parser.add_argument('--classic', action='store_true', help='使用经典界面进行兼容性排查')
     args = parser.parse_args()
     config = load_config()
     if args.self_check:
-        import playwright, psutil, tkinter, PIL
-        print('配置、Playwright、psutil、Tkinter、Pillow 导入成功。实站登录及任务完成仍需单独验收。')
+        import playwright, psutil, tkinter, PIL, webview
+        print('配置、Playwright、psutil、Tkinter、Pillow、pywebview 导入成功。实站登录及任务完成仍需单独验收。')
         return
     demo_dir = tempfile.TemporaryDirectory(prefix='rainclassroom-demo-') if args.demo else None
     if demo_dir:
         config['root'] = demo_dir.name
     lock = instance_lock(config['root'])
     import tkinter as tk
-    from gui.interface import Interface
     from recovery.watchdog import Watchdog
     base_config = config
     if not args.demo:
@@ -86,9 +86,24 @@ def main():
         watchdog.start()
     ui = None
     try:
-        root = tk.Tk()
-        ui = Interface(root, store, watchdog, args.demo, base_config=base_config)
-        root.mainloop()
+        if args.classic:
+            from gui.interface import Interface
+            root = tk.Tk()
+            ui = Interface(root, store, watchdog, args.demo, base_config=base_config)
+            root.mainloop()
+        else:
+            import webview
+            from gui.web_interface import WebInterface
+            ui = WebInterface(store, watchdog, args.demo, base_config=base_config)
+            from gui.web_assets import load_document
+            html = load_document()
+            window = webview.create_window('雨课堂 · 智能任务管理助手' + (' · 演示' if args.demo else ''),
+                html=html, width=1280, height=850, min_size=(900, 660), background_color='#e7eaf4')
+            ui.bind_window(window)
+            # Expose only two narrow endpoints, rather than every public controller method.
+            window.expose(ui.snapshot, ui.action)
+            window.events.closing += ui.on_closing
+            webview.start(gui='edgechromium', private_mode=True)
     finally:
         active_watchdog = ui.watchdog if ui else watchdog
         if active_watchdog:

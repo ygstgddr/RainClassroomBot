@@ -88,6 +88,14 @@ class SiteAdapter:
             raise AdaptationRequired('课程详情结构未知')
         self.course_dates[cid] = {'start': timestamp(data.get('class_start')),
                                   'end': timestamp(data.get('class_end'))}
+        # 日期和访问参数来自同一份课程详情。扫描已读取日期后，复用参数即可，
+        # 无需为章节目录再请求一次详情；courses() 刷新时会清空此缓存。
+        # 不缓存 schedule/完成状态，也不将 course_sign 持久化到数据库。
+        if data.get('course_sign'):
+            self.course_context[cid] = {'cid': cid, 'classroom_id': cid,
+                                        'sign': data['course_sign'], 'term': 'latest'}
+            if data.get('uv_id'):
+                self.course_headers[cid] = {'university-id': str(data['uv_id'])}
         return data
 
     async def course_metadata(self, course):
