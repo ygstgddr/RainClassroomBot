@@ -312,12 +312,15 @@ def test_real_edge_worker_login_then_one_click_scan_execute_or_keep_paused(tmp_p
 
     async def scenario(site):
         config = config_for(tmp_path, site.url)
-        config['headless'] = False  # 已是可见登录窗口，worker 无需交由 watchdog 重启。
+        # worker 按已有登录窗口的流程处理，不退出交由 watchdog 重建。
+        # 真正的 Edge 在测试中无头运行，隔离同桌面的鼠标点击/关窗；登录仍
+        # 通过 /login 网页设置 Cookie。可见恢复逻辑由上面的 worker 测试覆盖。
+        config['headless'] = False
         store = Store(tmp_path)
         store.set('account', {'id': '7', 'name': '本地验收账号'})
         store.select_courses(['10'], '7')
         store.set('desired', 'run')
-        browser = EdgeManager(config)
+        browser = EdgeManager({**config, 'headless': True})
         monkeypatch.setattr('worker.EdgeManager', lambda config: browser)
         process = asyncio.create_task(worker_async(config))
         try:

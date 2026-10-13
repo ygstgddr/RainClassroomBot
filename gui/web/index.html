@@ -40,9 +40,20 @@
     <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/></symbol>
     <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
   </defs></svg>
+  <header id="window-titlebar" class="window-titlebar" aria-label="工作台窗口">
+    <div class="window-caption pywebview-drag-region"><span id="window-caption">桌面工作台</span></div>
+    <div id="window-drag-region" class="window-title-drag pywebview-drag-region"><img class="window-title-logo" src="../assets/yuketang.png" alt="" draggable="false"><span>雨课堂 · 学习工作台</span></div>
+    <div class="window-controls" role="toolbar" aria-label="窗口控制">
+      <span class="window-controls-spacer pywebview-drag-region" aria-hidden="true"></span>
+      <button id="window-minimize" class="window-control window-control-minimize" data-action="window_minimize" type="button" aria-label="最小化工作台" title="最小化工作台" disabled><span class="window-minus" aria-hidden="true"></span></button>
+      <button id="window-maximize" class="window-control window-control-maximize" data-action="window_toggle_maximize" type="button" aria-label="最大化工作台" title="最大化工作台" disabled><svg class="window-expand" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 1H1v2M9 1h2v2M1 9v2h2M11 9v2H9"/></svg></button>
+      <button id="window-close" class="window-control window-control-close" data-action="window_close" type="button" aria-label="关闭工作台" title="关闭工作台" disabled><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+    </div>
+  </header>
+  <div class="window-resize-edge resize-n" data-window-resize="n" aria-hidden="true"></div><div class="window-resize-edge resize-ne" data-window-resize="ne" aria-hidden="true"></div><div class="window-resize-edge resize-e" data-window-resize="e" aria-hidden="true"></div><div class="window-resize-edge resize-se" data-window-resize="se" aria-hidden="true"></div><div class="window-resize-edge resize-s" data-window-resize="s" aria-hidden="true"></div><div class="window-resize-edge resize-sw" data-window-resize="sw" aria-hidden="true"></div><div class="window-resize-edge resize-w" data-window-resize="w" aria-hidden="true"></div><div class="window-resize-edge resize-nw" data-window-resize="nw" aria-hidden="true"></div>
   <div class="app-shell">
     <aside class="sidebar glass" aria-label="主导航">
-      <a class="brand" href="#courses" aria-label="雨课堂学习工作台"><span class="brand-mark"><svg class="icon"><use href="#i-book"/></svg></span><span>雨课堂<span class="brand-sub">学习工作台</span></span></a>
+      <a class="brand" href="#courses" aria-label="雨课堂学习工作台"><span class="brand-mark"><img src="../assets/yuketang.png" alt="雨课堂" draggable="false"></span><span>雨课堂<span class="brand-sub">学习工作台</span></span></a>
       <p class="nav-caption">工作空间</p>
       <nav class="navigation">
         <button class="nav-button is-active" data-page="courses" aria-current="page"><svg class="icon"><use href="#i-grid"/></svg><span>我的课程</span><span id="nav-course-count" class="nav-number">0</span></button>

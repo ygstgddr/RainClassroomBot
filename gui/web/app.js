@@ -7,7 +7,7 @@
   const pageNames = { courses: '我的课程', tasks: '任务队列', activity: '运行记录', tools: '其他功能' };
   const stateNames = { pending: '等待处理', running: '进行中', completed: '服务器已确认', manual: '人工处理', locked: '尚未开放', needs_adapter: '待适配', failed: '需要重试' };
   const typeNames = { video: '视频观看', article: '图文阅读', slides: 'PPT / 课件', homework: '作业提交', exam: '测试 / 考试', quiz: '测验', manual: '其他任务' };
-  const ui = { page: 'courses', courseFilter: 'all', courseSearch: '', taskSearch: '', taskType: 'all', unfinishedOnly: true, activityTab: 'logs', pending: false, connected: false, snapshot: null, modalReturnFocus: null, navigationToken: 0, confirmedTarget: '', typingTarget: '', typingSpeedDirty: false };
+  const ui = { page: 'courses', courseFilter: 'all', courseSearch: '', taskSearch: '', taskType: 'all', unfinishedOnly: true, activityTab: 'logs', pending: false, windowPending: false, connected: false, snapshot: null, modalReturnFocus: null, navigationToken: 0, confirmedTarget: '', typingTarget: '', typingSpeedDirty: false };
   const courseNodes = new Map();
   const taskNodes = new Map();
   const fingerprints = { courses: '', tasks: '', activity: '', history: '' };
@@ -31,7 +31,8 @@
       state: { phase: 'idle', busy: false, message: '', primary: { label: '连接学习账号', action: 'load_courses', enabled: false }, ...(raw.state || {}) },
       counts: { courses: list('courses').length, selected: list('courses').filter((c) => c.selected).length, tasks: list('tasks').length, completed: 0, pending: 0, errors: list('scan_errors').length, ...(raw.counts || {}) },
       progress: raw.progress || {}, courses: list('courses'), tasks: list('tasks'), logs: list('logs'), scan_errors: list('scan_errors'), current: raw.current || {}, filters: raw.filters || {}, empty: raw.empty || {},
-      typing: { phase: 'idle', available: false, sent: 0, total: 0, speed: 20, message: '', ...(raw.typing || {}) } };
+      typing: { phase: 'idle', available: false, sent: 0, total: 0, speed: 20, message: '', ...(raw.typing || {}) },
+      window: { maximized: false, native_controls: false, ...(raw.window || {}) } };
   }
 
   function applySnapshot(raw) {
@@ -51,7 +52,39 @@
     renderTasks();
     renderActivity();
     renderTools();
+    renderWindowFrame();
     syncDisabled();
+  }
+
+  function windowControlsAvailable() { return Boolean(hasAPI() && ui.snapshot && ui.snapshot.window.native_controls); }
+  function renderWindowFrame() {
+    const available = windowControlsAvailable(), maximized = Boolean(ui.snapshot && ui.snapshot.window.maximized);
+    const closing = ui.snapshot && ui.snapshot.state.phase === 'closing';
+    document.body.classList.toggle('window-is-maximized', maximized);
+    document.body.classList.toggle('window-controls-connected', available);
+    $('window-maximize').querySelector('path').setAttribute('d', maximized ? 'M2 4h6v6H2zM4 4V2h6v6H8' : 'M3 1H1v2M9 1h2v2M1 9v2h2M11 9v2H9');
+    const labels = { 'window-close': '关闭工作台', 'window-minimize': '最小化工作台', 'window-maximize': maximized ? '还原窗口' : '最大化工作台' };
+    for (const [id, label] of Object.entries(labels)) {
+      const control = $(id);
+      control.disabled = !available || ui.windowPending || Boolean(closing);
+      control.setAttribute('aria-label', label);
+      control.title = available ? label : '窗口控制仅在桌面程序中可用';
+    }
+    setText('window-caption', available ? '桌面工作台' : window.__RAIN_DEMO__ || ui.snapshot && ui.snapshot.demo ? '浏览器演示' : '窗口控件未连接');
+    $('window-drag-region').title = available ? '拖动移动窗口，双击最大化或还原' : '窗口拖动仅在桌面程序中可用';
+  }
+  async function sendWindowAction(name, payload = {}) {
+    if (!windowControlsAvailable() || ui.windowPending) return;
+    // Native window controls stay independent of learning/typing requests, so
+    // a running scan cannot block Minimize or the graceful Close action.
+    ui.windowPending = true; renderWindowFrame();
+    try {
+      const result = await window.pywebview.api.action(name, payload);
+      if (result && result.ok === false) showToast(result.message || '窗口操作暂未完成。', true);
+      if (name !== 'window_close') await refreshSnapshot(true);
+    } catch (error) {
+      if (name !== 'window_close') showToast('窗口操作暂未完成，请稍后重试。', true);
+    } finally { ui.windowPending = false; renderWindowFrame(); }
   }
 
   function renderHeader() {
@@ -468,6 +501,7 @@
   }
 
   async function handleAction(action, target) {
+    if (action.startsWith('window_')) { await sendWindowAction(action); return; }
     if (action.startsWith('typing_')) { await handleTypingAction(action); return; }
     if (action === 'settings') { openSettings(); return; }
     if (action === 'close_settings') { closeSettings(); return; }
@@ -494,6 +528,15 @@
     if (!event.target.closest('.hero-actions')) closeMenu();
   });
   $('primary-button').addEventListener('click', () => sendAction('primary'));
+  $('window-titlebar').addEventListener('dblclick', (event) => {
+    if (event.target.closest('button,input,textarea,select,a,[contenteditable]')) return;
+    if (event.target.closest('.pywebview-drag-region')) { event.preventDefault(); sendWindowAction('window_toggle_maximize'); }
+  });
+  document.addEventListener('mousedown', (event) => {
+    const edge = event.target.closest('[data-window-resize]');
+    if (!edge || event.button !== 0 || !windowControlsAvailable() || ui.snapshot.window.maximized) return;
+    event.preventDefault(); sendWindowAction('window_resize', { edge: edge.dataset.windowResize });
+  });
   $('more-trigger').addEventListener('click', () => { const open = $('more-menu').hidden; $('more-menu').hidden = !open; $('more-trigger').setAttribute('aria-expanded', String(open)); });
   document.querySelector('.brand').addEventListener('click', (event) => { event.preventDefault(); navigate('courses'); });
   $('course-search').addEventListener('input', (event) => { ui.courseSearch = event.target.value; renderCourses(); });
@@ -567,7 +610,7 @@
       { id: 'demo-t4', course_name: '艺术鉴赏与生活美学', title: '如何欣赏一幅画', type: 'video', type_label: '视频观看', status: 'completed', status_label: '服务器已确认', progress: 1 },
       { id: 'demo-t5', course_name: '大学英语（三）', title: 'Unit 3 · 课堂作业', type: 'manual', type_label: '作业提交', status: 'manual', status_label: '人工处理', progress: null },
     ];
-    return { demo: true, version: '0.7.0', site: { label: '长江雨课堂', url: 'https://changjiang.yuketang.cn/web', history: [{ label: '雨课堂', url: 'https://www.yuketang.cn/v2/web' }, { label: '长江雨课堂', url: 'https://changjiang.yuketang.cn/web' }] }, account: { name: '演示同学', logged_in: true }, state: { phase: 'idle', busy: false, selection_locked: false, message: '课程选择已保存。直接点击开始，自动扫描并安排学习任务。', primary: { label: '开始学习', action: 'start', enabled: true } }, counts: { courses: courses.length, selected: 3, tasks: tasks.length, completed: 1, pending: 3, errors: 0 }, courses, tasks, logs: [{ time: '10-13 15:24:12', level: '服务器已确认', course: '艺术鉴赏与生活美学', task: '如何欣赏一幅画', message: '任务完成状态已同步。' }, { time: '10-13 15:23:48', level: '扫描完成', message: '所选课程任务已加入队列。' }], scan_errors: [], progress: { current: 1, total: 5, percent: 20, label: '学习进度' }, filters: { task_type: 'all', unfinished_only: true } };
+    return { demo: true, version: '0.8.0', site: { label: '长江雨课堂', url: 'https://changjiang.yuketang.cn/web', history: [{ label: '雨课堂', url: 'https://www.yuketang.cn/v2/web' }, { label: '长江雨课堂', url: 'https://changjiang.yuketang.cn/web' }] }, account: { name: '演示同学', logged_in: true }, state: { phase: 'idle', busy: false, selection_locked: false, message: '课程选择已保存。直接点击开始，自动扫描并安排学习任务。', primary: { label: '开始学习', action: 'start', enabled: true } }, counts: { courses: courses.length, selected: 3, tasks: tasks.length, completed: 1, pending: 3, errors: 0 }, courses, tasks, logs: [{ time: '10-13 15:24:12', level: '服务器已确认', course: '艺术鉴赏与生活美学', task: '如何欣赏一幅画', message: '任务完成状态已同步。' }, { time: '10-13 15:23:48', level: '扫描完成', message: '所选课程任务已加入队列。' }], scan_errors: [], progress: { current: 1, total: 5, percent: 20, label: '学习进度' }, filters: { task_type: 'all', unfinished_only: true } };
   }
   async function demoAction(name, payload) {
     if (name.startsWith('typing_')) return { ok: false, message: '演示工具不会向网页输出。请在正式程序中选择真实目标。' };
@@ -588,5 +631,6 @@
   // It exposes the already-public display snapshot, never the business Store.
   window.RainUI = Object.freeze({ applySnapshot, getState: () => ({ page: ui.page, courseFilter: ui.courseFilter, taskType: ui.taskType, unfinishedOnly: ui.unfinishedOnly, pending: ui.pending, snapshot: ui.snapshot }), navigate, demoSnapshot });
   $('primary-button').dataset.testid = 'primary-action';
+  renderWindowFrame();
   poll();
 })();

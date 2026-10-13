@@ -8,6 +8,10 @@ Microsoft Edge 浏览器和 Microsoft Edge WebView2 Runtime 由用户安装，�
 
 Windows 发行包的 `third_party_licenses/` 保存从实际构建环境复制的许可证和声明；Playwright 自带声明也保留在其打包目录中。源码运行时请同时遵守所安装依赖附带的许可证。
 
-`scripts/collect_licenses.py` 根据本机安装包元数据收集许可证并记录版本，构建环境变化后应重新执行。这里的第三方声明不替代各组件的完整许可证，也不为本项目源码另外指定许可证。
+`scripts/collect_licenses.py` 根据本机安装包元数据收集许可证并记录版本，构建环境变化后应重新执行。这里的第三方声明不替代各组件的完整许可证。
 
 `proxy_tools` 的旧版 wheel 未附带许可证文件，源码保留其上游许可证副本于 `third_party_licenses/proxy_tools/LICENSE.txt`，打包脚本会一并复制。其他组件的实际构建版本记录在发行包的 `third_party_licenses/versions.json` 中。
+
+## 雨课堂图标
+
+官方图标取自雨课堂官网 favicon。图标与品牌标识归原权利人所有，项目代码许可证不覆盖品牌标识；来源与校验值见 `gui/assets/ICON_SOURCE.md`。

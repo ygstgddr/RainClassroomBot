@@ -21,6 +21,7 @@ from core.config import app_root
 from core.courses import course_state, date_text
 from core.sites import PRESETS, normalize_site, prepare_site, read_sites, save_site, site_config
 from core.task_types import AUTOMATED_KINDS, type_label
+from gui.window_frame import WindowFrame
 
 
 STATES = {'pending': '待处理', 'running': '进行中', 'completed': '服务器已确认',
@@ -66,6 +67,7 @@ class WebInterface:
         self.active_site, self.history = (read_sites(base_config) if base_config
                                          else (PRESETS[0], list(PRESETS)))
         self.window = None
+        self.window_frame = None
         self.switching = self.closing = self.closed = False
         self._lock = threading.RLock()
         self._lifecycle_thread = None
@@ -79,6 +81,7 @@ class WebInterface:
 
     def bind_window(self, window):
         self.window = window
+        self.window_frame = WindowFrame(window)
 
     def _notify(self, message):
         self._notice, self._notice_until = _text(message), time.monotonic() + 6
@@ -259,6 +262,8 @@ class WebInterface:
                 'task': _text(e.get('task'), 240), 'message': _text(e.get('reason'))} for e in events]
             busy = self.switching or self.closing or worker_busy or desired in ACTIVE or typing['phase'] in TYPING_ACTIVE or typing['pending']
             return {'version': self.version, 'demo': self.demo,
+                'window': (self.window_frame.snapshot() if self.window_frame
+                           else {'maximized': False, 'native_controls': False}),
                 'site': {'url': self.active_site, 'label': _site_label(self.active_site),
                          'history': [{'url': url, 'label': _site_label(url)} for url in self.history]},
                 'account': {'name': _text(account.get('name') or '等待登录', 100),
@@ -283,10 +288,19 @@ class WebInterface:
 
     def action(self, name, payload=None):
         """Validate small commands; never expose arbitrary Store writes."""
+        if not isinstance(name, str) or (payload is not None and not isinstance(payload, dict)):
+            return {'ok': False, 'message': '操作参数无效，请重试'}
+        payload = payload or {}
+        # Window controls remain usable while sites switch or learning runs.
+        # Never hold the Store command lock across a WinForms Invoke.
+        if name.startswith('window_'):
+            try:
+                return self._window_action(name, payload)
+            except ValueError as exc:
+                return {'ok': False, 'message': _text(exc)}
+            except Exception as exc:
+                return {'ok': False, 'message': f'窗口操作暂未成功（{type(exc).__name__}）'}
         with self._lock:
-            if not isinstance(name, str) or (payload is not None and not isinstance(payload, dict)):
-                return {'ok': False, 'message': '操作参数无效，请重试'}
-            payload = payload or {}
             if self.closing or self.closed:
                 return {'ok': False, 'message': '程序正在关闭，状态会自动保存'}
             if self.switching:
@@ -300,6 +314,30 @@ class WebInterface:
                 # details. Expose a short category and keep diagnostics local.
                 self.store.event('界面操作失败', type(exc).__name__)
                 return {'ok': False, 'message': f'操作暂未成功（{type(exc).__name__}），请查看运行记录后重试'}
+
+    def _window_action(self, name, payload):
+        allowed = {'window_minimize', 'window_toggle_maximize', 'window_close', 'window_resize'}
+        if name not in allowed:
+            raise ValueError('不支持的窗口操作')
+        if not self.window or not self.window_frame:
+            raise ValueError('当前界面没有原生窗口')
+        if (name != 'window_resize' and payload) or (name == 'window_resize' and set(payload) != {'edge'}):
+            raise ValueError('窗口操作参数无效')
+        if name == 'window_close':
+            self.close()
+            return {'ok': True, 'window': self.window_frame.snapshot()}
+        if self.closing or self.closed:
+            raise ValueError('程序正在关闭，状态会自动保存')
+        if name == 'window_minimize':
+            self.window_frame.minimize()
+        elif name == 'window_toggle_maximize':
+            self.window_frame.toggle_maximize()
+        else:
+            edge = payload.get('edge')
+            if not isinstance(edge, str):
+                raise ValueError('窗口缩放方向无效')
+            self.window_frame.resize(edge)
+        return {'ok': True, 'window': self.window_frame.snapshot()}
 
     def _action(self, name, payload):
         if name.startswith('typing_'):

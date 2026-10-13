@@ -54,6 +54,8 @@ def demo_data(store):
 
 
 def main():
+    from gui.window_frame import icon_path, set_app_id
+    set_app_id()
     parser = argparse.ArgumentParser(description='雨课堂智能任务管理助手')
     parser.add_argument('--demo', action='store_true', help='使用临时演示数据，不连接雨课堂')
     parser.add_argument('--self-check', action='store_true', help='检查配置和依赖，不打开账号')
@@ -89,6 +91,8 @@ def main():
         if args.classic:
             from gui.interface import Interface
             root = tk.Tk()
+            if icon_path():
+                root.iconbitmap(str(icon_path()))
             ui = Interface(root, store, watchdog, args.demo, base_config=base_config)
             root.mainloop()
         else:
@@ -97,13 +101,18 @@ def main():
             ui = WebInterface(store, watchdog, args.demo, base_config=base_config)
             from gui.web_assets import load_document
             html = load_document()
+            # Only the explicit title-bar region may move the window. Inputs,
+            # course cards and traffic-light controls remain ordinary controls.
+            webview.settings['DRAG_REGION_DIRECT_TARGET_ONLY'] = True
             window = webview.create_window('雨课堂 · 智能任务管理助手' + (' · 演示' if args.demo else ''),
-                html=html, width=1280, height=850, min_size=(900, 660), background_color='#e7eaf4')
+                html=html, width=1280, height=850, min_size=(900, 660), background_color='#e7eaf4',
+                frameless=True, easy_drag=False, resizable=True, shadow=True)
             ui.bind_window(window)
             # Expose only two narrow endpoints, rather than every public controller method.
             window.expose(ui.snapshot, ui.action)
             window.events.closing += ui.on_closing
-            webview.start(gui='edgechromium', private_mode=True)
+            webview.start(gui='edgechromium', private_mode=True,
+                          icon=str(icon_path()) if icon_path() else None)
     finally:
         active_watchdog = ui.watchdog if ui else watchdog
         if active_watchdog:
@@ -123,6 +132,9 @@ if __name__ == '__main__':
         from tkinter import messagebox
         root = tk.Tk()
         root.withdraw()
+        from gui.window_frame import icon_path
+        if icon_path():
+            root.iconbitmap(str(icon_path()))
         messagebox.showerror('雨课堂助手启动失败', str(exc))
         root.destroy()
         sys.exit(1)

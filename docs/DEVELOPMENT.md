@@ -2,7 +2,7 @@
 
 ## 开发环境
 
-0.7.0 的验证环境是 Windows 11 x64、Python 3.12.10、Microsoft Edge 和已安装的 Microsoft Edge WebView2 Runtime。推荐独立虚拟环境，运行路径使用项目根目录。缺少 WebView2 时先从 [Microsoft 官方页面](https://developer.microsoft.com/en-us/microsoft-edge/webview2/consumer/)安装 Evergreen WebView2 Runtime。
+0.8.0 的验证环境是 Windows 11 x64、Python 3.12.10、Microsoft Edge 和已安装的 Microsoft Edge WebView2 Runtime。推荐独立虚拟环境，运行路径使用项目根目录。缺少 WebView2 时先从 [Microsoft 官方页面](https://developer.microsoft.com/en-us/microsoft-edge/webview2/consumer/)安装 Evergreen WebView2 Runtime。
 
 ```powershell
 py -3.12 -m venv .venv
@@ -44,6 +44,8 @@ RainClassroomBot/
 ├── gui/
 │   ├── web_interface.py     # 快照/动作桥接、选课与异步切站关闭
 │   ├── web_assets.py        # 内联本地界面资源，无外部 CDN
+│   ├── window_frame.py      # 绑定窗口的原生控制、工作区与尺寸约束
+│   ├── assets/              # 官网原始 PNG、Windows ICO 与来源记录
 │   ├── web/
 │   │   ├── index.html      # 统一桌面结构与图标
 │   │   ├── app.css         # 半透明玻璃、背景模糊与交互动画
@@ -62,6 +64,25 @@ GUI 与浏览器工作进程分离，通过本地 SQLite 交换学习状态和�
 WebView 的桥接调用可能并发到达，动作通过锁串行检查选课范围与当前状态；快照在一次读取事务中获取账号、目录、所选任务与日志，再转换为前端字段白名单。切站、恢复和退出使用后台线程，等待守护退出时不持有界面操作锁。必须先退出旧工作进程，再创建新站工作进程；中途关闭、写配置失败或新守护启动失败都需清理新进程并保持可恢复状态。
 
 修改交互流程时，请使用临时 Store 和虚构课程进行界面测试，并验证开始、暂停、继续、改选课程、扫描失败和切站状态。工作进程尚未停止时，不得允许更改当前执行范围。主按钮发出操作意图，是否需要扫描由工作进程根据当前账号和选课范围判断；不要在 GUI 的定时刷新中绕过扫描直接执行任务。
+
+## 内置标题栏与图标
+
+0.8.0 的默认 WebView 工作台使用 `frameless=True`、`easy_drag=False`、`resizable=True`。HTML 的 44px 玻璃标题栏在右上角从左到右提供黄色最小化、绿色最大化/还原、红色关闭按钮，仅空白拖动区使用 `pywebview-drag-region`；`DRAG_REGION_DIRECT_TARGET_ONLY` 防止拖动区域内的按钮和表单交互带动整个窗口。双击空白区调用最大化切换，窗口四边与四角提供八方向缩放入口。
+
+`gui/window_frame.py` 的 `WindowFrame` 只控制 `bind_window` 绑定的工作台窗口。`snapshot.window` 返回 `maximized` 和 `native_controls`，前端据此显示最大化/还原状态，并在原生窗口初始化前禁用窗口按钮。原生控件的操作参数白名单为：
+
+| 动作 | 参数 / 行为 |
+|---|---|
+| `window_close` | 不接受参数，调用原有 `WebInterface.close()`，停止、保存和清理后销毁窗口 |
+| `window_minimize` | 不接受参数，最小化工作台，不修改学习操作意图 |
+| `window_toggle_maximize` | 不接受参数，按当前窗口状态最大化或还原 |
+| `window_resize` | 仅接受 `{edge}`，值为 `n`、`s`、`e`、`w`、`ne`、`nw`、`se`、`sw` |
+
+页面不能提交任意 HWND、PID、屏幕坐标或窗口尺寸。原生操作在所绑定 WinForms 窗口的 GUI 线程执行，窗口缩放交由 Windows 处理；最大化依据当前显示器工作区域，保留任务栏和界面最小尺寸。关闭必须复用原有异步工作进程清理流程，不能直接退出进程或调用全局结束 Edge。最小化仍执行当前学习任务，主动暂停需使用学习主按钮。
+
+图标位于 `gui/assets/yuketang.png` 和 `yuketang.ico`。PNG 是官网指定 favicon 的原始 64 × 64 响应，图形内容未改；ICO 将同一图片转为 Windows 所需容器及尺寸。标题栏和侧栏使用 PNG，窗口、任务栏、启动提示与 exe 使用 ICO；资产随程序加载，不在运行时下载。`icon_path()` 同时支持源码目录和 PyInstaller 的 `_MEIPASS` 资源路径，`set_app_id()` 为 Windows 任务栏设置本助手应用标识。来源与文件校验值见 [ICON_SOURCE.md](../gui/assets/ICON_SOURCE.md)，标识归原权利人所有，本项目为独立工具。
+
+修改窗口控制后，在真实 Windows 桌面验证三色按钮、标题栏拖动/双击、八方向缩放、最大化工作区域、最小尺寸、图标和优雅退出；本地 HTML 预览只能验证前端交互，不能替代这些原生窗口检查。最终源码与冻结 exe 的验证范围见 [VALIDATION.md](../VALIDATION.md)。
 
 ## 指定文本框打字的实现与约束
 
@@ -116,7 +137,13 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 脚本会安装开发依赖、运行测试，再用 PyInstaller 构建。任何一步失败都会停止。输出为 `dist/RainClassroomBot/`，入口为 `RainClassroomBot.exe`。
 
-WebView 桌面除了 Playwright，还需收集 `webview`、`pythonnet`、`clr_loader` 与 `clr`，并使用 `--add-data 'gui/web;gui/web'` 打包本地界面。相应选项已经包含在 `build.ps1` 中；请直接使用脚本，避免遗漏 CSS/JavaScript 或 Windows 渲染器组件。用户端仍需安装 Microsoft 官方 WebView2 Runtime，发行 zip 不内嵌完整运行时。
+WebView 桌面除了 Playwright，还需收集 `webview`、`pythonnet`、`clr_loader` 与 `clr`。使用 `--add-data 'gui/web;gui/web'` 打包本地界面，使用 `--add-data 'gui/assets;gui/assets'` 打包图标与来源说明，并用 `--icon gui/assets/yuketang.ico` 写入 exe 图标。相应选项已经包含在 `build.ps1` 中；请直接使用脚本，避免遗漏 CSS/JavaScript、图标或 Windows 渲染器组件。用户端仍需安装 Microsoft 官方 WebView2 Runtime，发行 zip 不内嵌完整运行时。
+
+需要排查 PyInstaller 参数时，脚本中的构建命令为：
+
+```powershell
+.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --windowed --onedir --name RainClassroomBot --collect-all playwright --collect-all webview --collect-all pythonnet --collect-all clr_loader --hidden-import clr --icon gui/assets/yuketang.ico --add-data 'gui/web;gui/web' --add-data 'gui/assets;gui/assets' main.py
+```
 
 脚本只复制默认 `config/config.yaml`，不复制本机的 `config/site.json`。它也会附带 README、验证记录、开发文档和第三方许可证。必须分发整个目录，不能只分发 exe。
 
