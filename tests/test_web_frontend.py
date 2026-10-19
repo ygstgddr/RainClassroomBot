@@ -1,10 +1,67 @@
 """Real Edge rendering and bridge interactions using fictional data only."""
 import asyncio
+import pytest
 from playwright.async_api import async_playwright
 from core.store import Store
 from gui.web_assets import load_document
 from gui.web_interface import WebInterface
 from main import demo_data
+
+
+@pytest.mark.parametrize('viewport', [(1264, 811), (900, 660)])
+@pytest.mark.parametrize('phase', ['idle', 'loading_courses'])
+def test_more_menu_above_cards_and_below_settings(tmp_path, viewport, phase):
+    """Blurred cards must not intercept the menu, including during loading."""
+    async def scenario():
+        store = Store(tmp_path); demo_data(store)
+        store.set('desired', 'catalog' if phase == 'loading_courses' else 'idle')
+        async with async_playwright() as engine:
+            browser = await engine.chromium.launch(channel='msedge', headless=True)
+            try:
+                page, _ = await open_ui(browser, store)
+                await page.set_viewport_size(dict(zip(('width', 'height'), viewport)))
+                await page.locator('#more-trigger').click()
+                # Wait for the real entrance animation, then test actual hit targets.
+                await page.locator('#more-menu').evaluate(
+                    'el => Promise.all(el.getAnimations().map(a => a.finished))')
+                rows = await page.locator('#more-menu button').evaluate_all('''items => items.map(el => {
+                    const r = el.getBoundingClientRect();
+                    return {action: el.dataset.action, hit: el.contains(document.elementFromPoint(
+                        r.x + r.width / 2, r.y + r.height / 2)), inside: r.bottom <= innerHeight};
+                })''')
+                assert len(rows) == 5
+                assert all(row['hit'] and row['inside'] for row in rows), rows
+                # Capture clicks before the bridge: never open real browser/log windows.
+                await page.evaluate('''() => {
+                    window.menuClicks = [];
+                    document.querySelector('#more-menu').addEventListener('click', e => {
+                        const button = e.target.closest('button');
+                        if (button) { window.menuClicks.push(button.dataset.action); e.stopPropagation(); }
+                    }, true);
+                }''')
+                for button in await page.locator('#more-menu button:enabled').all():
+                    action = await button.get_attribute('data-action')
+                    await button.click(timeout=1500)
+                    assert await page.evaluate('window.menuClicks.at(-1)') == action
+                await page.keyboard.press('Escape')
+                assert await page.locator('#more-menu').is_hidden()
+                await page.locator('#more-trigger').click()
+                await page.locator('.breadcrumb').click()
+                assert await page.locator('#more-menu').is_hidden()
+                await page.locator('#more-trigger').click()
+                await page.locator('[data-action="settings"]').first.click()
+                assert await page.locator('#more-menu').is_hidden()
+                dialog = page.locator('#settings-overlay')
+                assert await dialog.is_visible()
+                assert await dialog.evaluate('''el => {
+                    const r = document.querySelector('.hero-actions').getBoundingClientRect();
+                    return el.contains(document.elementFromPoint(r.x + r.width/2, r.y + r.height/2));
+                }''')
+                await page.keyboard.press('Escape')
+                assert await dialog.is_hidden()
+            finally:
+                await browser.close()
+    asyncio.run(scenario())
 
 
 async def open_ui(browser, store):

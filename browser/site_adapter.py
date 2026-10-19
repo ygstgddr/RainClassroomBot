@@ -1,6 +1,6 @@
-"""雨课堂前端 1.2.321 的只读接口适配。
+"""雨课堂 Web 1.2.321 / LMS 1.3.322 的只读接口适配。
 
-依据公开 pc.87fb3ab3.js；账号数据和校园部署仍需实站验收。
+依据公开前端及已记录的实站核验；其他校园部署仍需实站验收。
 本模块不发送学习心跳或写入完成标记，所有学习上报由正常页面处理。
 """
 import json
@@ -36,6 +36,18 @@ def completion(leaf_type, schedule):
         if type(done) is int and type(total) is int and 0 <= done <= total:
             return done > 0 and done == total, done / total if total else 0
     return None, None
+
+
+def leaf_completion(leaf_type, schedules, leaf_id):
+    """兼容视频、图文没有初始记录的稀疏进度表。
+
+    官方学习内容页对缺少的项显示 0。这里只为已适配的视频、图文采用
+    相同的未完成初始状态；显式 null、未知格式及其他类型仍需适配。
+    缺项绝不产生完成证据，执行后仍须等服务器明确返回完成记录。
+    """
+    if leaf_id not in schedules and leaf_type in (0, 3):
+        return False, 0.0
+    return completion(leaf_type, schedules.get(leaf_id))
 
 
 def leaves(chapters):
@@ -215,10 +227,12 @@ class SiteAdapter:
             typ = leaf['leaf_type']
             if type(typ) is not int:
                 raise AdaptationRequired('任务类型字段不是整数')
-            done, progress = completion(typ, schedules.get(lid))
+            done, progress = leaf_completion(typ, schedules, lid)
             kind = task_kind(typ)
             state = 'completed' if done else 'locked' if leaf.get('is_locked') else 'manual' if kind not in AUTOMATED_KINDS else 'pending'
             note = manual_note(typ) if state == 'manual' else ''
+            if state == 'pending' and lid not in schedules and typ in (0, 3):
+                note = '服务器尚无进度记录；打开任务后持续查询，明确记录完成才进入下一项'
             if done is None and kind in AUTOMATED_KINDS and state != 'locked':
                 state, note = 'needs_adapter', '服务器未提供该任务的可识别进度，不能自动判定'
             deadline = leaf.get('score_deadline')
@@ -241,11 +255,12 @@ class SiteAdapter:
     async def status(self, task):
         await self.account()  # 防止运行中换号后把另一个账号的完成状态写入当前任务。
         schedules = await self.schedule(task['classroom_id'])
-        value = schedules.get(task['leaf_id'])
-        done, progress = completion(task['leaf_type'], value)
+        done, progress = leaf_completion(task['leaf_type'], schedules, task['leaf_id'])
         if done is None:
             raise AdaptationRequired('当前任务服务器进度缺失或含义未知')
-        return done, progress, self.evidence(task['classroom_id'], task['leaf_id'], value)
+        evidence = (self.evidence(task['classroom_id'], task['leaf_id'], schedules[task['leaf_id']])
+                    if done else '')
+        return done, progress, evidence
 
     async def prepare_slides(self, task):
         """取得网站实际 PPT 入口及页数，只读，不构造阅读上报。"""

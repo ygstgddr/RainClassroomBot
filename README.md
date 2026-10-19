@@ -2,9 +2,15 @@
 
 基于 **Python + Playwright + Microsoft Edge + pywebview / WebView2** 的 Windows 桌面任务管理工具。按开课时间选择课程，扫描未完成任务，通过网页正常操作处理已适配的视频、图文和 PPT，并复查服务器完成记录。
 
-当前版本：**0.8.0**。需要 Windows 10/11 x64、Microsoft Edge 和 Microsoft Edge WebView2 Runtime。
+当前版本：**0.8.1**。需要 Windows 10/11 x64、Microsoft Edge 和 Microsoft Edge WebView2 Runtime。
 
 日常操作只需 **选课程 → 点开始**。助手自动检查选课范围、扫描任务并继续执行；同一个主按钮负责开始、暂停和继续。
+
+0.8.1 同时修复了“更多操作”菜单被统计卡片遮住、选项无法点击的问题，保持现有苹果玻璃风格。
+
+0.8.1 修复部分课程的视频、图文没有初始进度记录时被误标为“需要适配”的问题。更新后重新扫描即可恢复这些任务；执行后的完成判定仍须取得服务器明确记录。日志和界面会显示本轮实际处理数量、确认数量和剩余状态，未执行任务时会明确说明。
+
+**从 0.8.0 更新：**退出旧版并等待其管理的 Edge 关闭，将新版压缩包解压到临时文件夹，再把其中的 `RainClassroomBot.exe`、整个 `_internal` 文件夹、`VERSION.txt` 及说明文档复制到旧程序目录并覆盖同名文件。保留旧目录中的 `config`、`data`、`sites`、`edge_profile`，无需删除登录状态。重新打开软件后点击“更多 → 重新扫描”，或点“开始”自动更新所选课程任务。不能只替换 exe 而遗漏 `_internal`。
 
 [下载 Windows 程序](https://github.com/ygstgddr/RainClassroomBot/releases/latest) · [更新记录](CHANGELOG.md) · [验证范围](VALIDATION.md) · [开发与打包](docs/DEVELOPMENT.md) · [反馈问题](https://github.com/ygstgddr/RainClassroomBot/issues)
 

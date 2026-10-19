@@ -1,4 +1,5 @@
 import asyncio
+from collections import Counter
 from core.errors import Interrupted, LoginRequired, AdaptationRequired
 from core.logging_setup import record
 from task.executor import execute
@@ -24,6 +25,7 @@ async def run_queue(adapter, browser, store, config, logger):
         record(store, logger, '队列暂停', '上次中断任务尚未解决，请重试或修正适配后重新扫描', blocked)
         return
     store.set('blocked_task', None)
+    processed, confirmed = 0, 0
     for task in tasks:
         if store.get('desired') != 'run':
             raise Interrupted()
@@ -34,6 +36,7 @@ async def run_queue(adapter, browser, store, config, logger):
             store.set('blocked_task', task['key'])
             store.set('desired', 'paused')
             return
+        processed += 1
         while task['attempts'] < config['max_task_attempts']:
             if store.get('desired') != 'run':
                 raise Interrupted()
@@ -46,6 +49,7 @@ async def run_queue(adapter, browser, store, config, logger):
                 store.update(task['key'], state='completed', progress=1, evidence=evidence,
                              note='服务器进度已确认')
                 record(store, logger, '完成', '已复查服务器任务记录', task)
+                confirmed += 1
                 committed = True
                 # 完成后退出任务页面，阻止网站自行连续播放到其他任务。
                 await browser.page.goto(config['base_url'] + config['entry_path'], wait_until='domcontentloaded')
@@ -83,8 +87,21 @@ async def run_queue(adapter, browser, store, config, logger):
                     # 交给进程守护重建 Edge，数据库已保存任务及尝试次数。
                     raise RuntimeError('Edge 已关闭，需要进程重建')
                 await browser.page.goto(config['base_url'] + config['entry_path'], wait_until='domcontentloaded')
+    summary = None
     if store.get('desired') == 'run':
         store.set('desired', 'idle')
         remaining = [t for t in store.scoped_rows() if t['state'] != 'completed']
-        record(store, logger, '队列结束', f'自动队列已处理；仍有 {len(remaining)} 个锁定、未适配或人工任务')
+        counts = Counter(t['state'] for t in remaining)
+        labels = {'locked': '锁定', 'needs_adapter': '需要适配', 'manual': '需手动完成',
+                  'failed': '失败', 'pending': '待执行', 'running': '执行中'}
+        details = '、'.join(f'{labels.get(state, "其他状态")} {count} 项'
+                           for state, count in sorted(counts.items()))
+        message = (f'本轮处理 {processed} 项，服务器确认完成 {confirmed} 项'
+                   if processed else '本轮未执行任务')
+        message += f'；剩余 {len(remaining)} 项未完成'
+        if details:
+            message += f'（{details}）'
+        summary = dict(processed=processed, confirmed=confirmed, remaining=len(remaining), message=message)
+        record(store, logger, '队列结束', message)
     store.set('current', {})
+    return summary

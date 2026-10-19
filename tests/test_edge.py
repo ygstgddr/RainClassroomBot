@@ -23,7 +23,8 @@ def config_for(tmp_path, url):
     return config
 
 
-def test_real_edge_video_article_server_confirmation_and_login_persistence(tmp_path):
+@pytest.mark.parametrize('sparse', [False, True])
+def test_real_edge_video_article_server_confirmation_and_login_persistence(tmp_path, sparse):
     async def scenario(site):
         config = config_for(tmp_path, site.url)
         store = Store(tmp_path)
@@ -38,6 +39,7 @@ def test_real_edge_video_article_server_confirmation_and_login_persistence(tmp_p
             await browser.page.goto(site.url + '/login')
             await scan(adapter, store, config, make_logger(tmp_path, 'test_edge'))
             assert len(store.rows()) == 2
+            assert all(t['state'] == 'pending' for t in store.rows())
             assert site.finished == {}
             # 完全关闭后重开相同 profile；cookie 仍有效。
             await browser.close()
@@ -62,6 +64,7 @@ def test_real_edge_video_article_server_confirmation_and_login_persistence(tmp_p
         finally:
             await browser.close()
     with MockSite() as site:
+        site.omit_unstarted_schedules = sparse
         asyncio.run(scenario(site))
 
 
@@ -100,7 +103,8 @@ def test_pause_and_account_switch_do_not_complete(tmp_path):
         asyncio.run(scenario(site))
 
 
-def test_ended_video_without_server_confirmation_fails(tmp_path):
+@pytest.mark.parametrize('sparse', [False, True])
+def test_ended_video_without_server_confirmation_fails(tmp_path, sparse):
     async def scenario(site):
         config = config_for(tmp_path, site.url)
         config['confirmation_timeout_seconds'] = 1
@@ -123,4 +127,5 @@ def test_ended_video_without_server_confirmation_fails(tmp_path):
             await browser.close()
     with MockSite() as site:
         site.delay = 999
+        site.omit_unstarted_schedules = sparse
         asyncio.run(scenario(site))

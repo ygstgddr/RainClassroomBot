@@ -106,14 +106,15 @@ class Workflow:
         # 新一轮“开始”由界面显式写入 start，改选或失败扫描仍会走上面的扫描。
         self.store.set('run_mode', 'resume')
         self.show('running', '正在处理所选任务，完成状态以服务器记录为准', action)
-        await run_queue(self.adapter, self.browser, self.store, self.config, self.logger)
+        summary = await run_queue(self.adapter, self.browser, self.store, self.config, self.logger)
         desired = self.store.get('desired')
         if desired == 'idle':
             rows = self.store.scoped_rows()
             remaining = sum(t['state'] != 'completed' for t in rows)
-            message = ('所选课程暂未发现任务' if not rows else
-                       f'自动任务已处理，还有 {remaining} 项需要查看'
-                       if remaining else '本轮任务已处理，服务器已确认完成')
+            message = ((summary or {}).get('message') or
+                       ('所选课程暂未发现任务' if not rows else
+                        f'仍有 {remaining} 项未完成，请查看任务状态'
+                        if remaining else '本轮任务已处理，服务器已确认完成'))
             self.show('ready', message)
         elif desired == 'paused':
             self.show('paused', '已暂停，可查看任务状态后继续')

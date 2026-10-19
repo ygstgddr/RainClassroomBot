@@ -61,6 +61,7 @@ class MockSite:
         self.delay = 1.2
         self.requests = []
         self.fail_schedule = False
+        self.omit_unstarted_schedules = False
         self.user_id = 7
         self.include_slides = False
         self.slide_reads = {}
@@ -120,7 +121,9 @@ class MockSite:
                         return self.send({'success': False}, 503)
                     schedules = {
                         lid: 1 if lid in site.finished and time.monotonic()-site.finished[lid]>=site.delay else 0
-                        for lid in ('1', '2')}
+                        for lid in ('1', '2')
+                        if not site.omit_unstarted_schedules or
+                        lid in site.finished and time.monotonic()-site.finished[lid]>=site.delay}
                     if site.include_slides:
                         schedules['3'] = {'done': sum(time.monotonic()-when>=site.delay for when in site.slide_reads.values()), 'total': 3}
                     return self.send({'success': True, 'data': {'leaf_schedules': schedules}})
