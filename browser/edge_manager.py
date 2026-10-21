@@ -46,6 +46,47 @@ class EdgeManager:
                 await asyncio.wait_for(self.playwright.stop(), 8)
             self.context = self.page = self.playwright = None
 
+    async def task_entry(self, task):
+        """优先使用网站叶子节点 ID，避免章节/图文/视频的同名歧义。
+
+        实站节点为 custom-<section_id>_<leaf_id>。只读定位后正常点击；
+        旧页面没有这种节点时，仍要求所有 frame 中恰好一个可见同名入口。
+        """
+        leaf_id = str(task.get('leaf_id', ''))
+        identified, named = [], []
+        id_present = False
+        for frame in self.page.frames:
+            if await visible_security_challenge(frame):
+                raise LoginRequired('网站要求安全验证，请在 Edge 完成滑块验证后重新扫描并继续')
+            current = frame
+            while current.parent_frame:
+                if not await (await current.frame_element()).is_visible():
+                    break
+                current = current.parent_frame
+            if current.parent_frame:
+                continue  # 隐藏的预加载 iframe 不参与任务入口匹配。
+            if leaf_id.isascii() and leaf_id.isdigit():
+                rows = frame.locator(f'.is-custom-leaf[id^="custom-"][id$="_{leaf_id}"]')
+                for row in await rows.all():
+                    id_present = True
+                    if not await row.is_visible():
+                        # Element UI 的已渲染折叠节点：只展开该任务的祖先。
+                        parents = row.locator('xpath=ancestor::*[@role="treeitem" and @aria-expanded="false"]')
+                        for parent in await parents.all():
+                            toggle = parent.locator(':scope > .el-tree-node__content > .el-tree-node__expand-icon')
+                            if await toggle.count() == 1 and await toggle.is_visible():
+                                await toggle.click(timeout=3000)
+                    if await row.is_visible() and await row.get_by_text(task['title'], exact=True).count() == 1:
+                        # 整行右侧属于知识点容器；点击标题才能触发叶子任务
+                        # 自己的 handler（网站在 .leaf-detail 上阻止事件冒泡）。
+                        identified.append(row.get_by_text(task['title'], exact=True))
+            for item in await frame.get_by_text(task['title'], exact=True).all():
+                if await item.is_visible():
+                    named.append(item)
+        if id_present:
+            return identified[0] if len(identified) == 1 else None
+        return named[0] if len(named) == 1 else None
+
     async def open_task(self, task):
         if task['kind'] == 'slides' and task.get('_slides_path'):
             await self.page.goto(self.config['base_url'] + task['_slides_path'], wait_until='domcontentloaded')
@@ -73,27 +114,20 @@ class EdgeManager:
                     if 'rain-tabs__nav-item--active' not in (await tab.get_attribute('class') or '').split():
                         await tab.click(timeout=3000)
                     content_selected = True
-            for frame in self.page.frames:
-                if await visible_security_challenge(frame):
-                    raise LoginRequired('网站要求安全验证，请在 Edge 完成滑块验证后重新扫描并继续')
-                candidate = frame.get_by_text(task['title'], exact=True)
-                visible = []
-                for item in await candidate.all():
-                    if await item.is_visible():
-                        visible.append(item)
-                if len(visible) == 1:
-                    before = list(self.context.pages)
-                    await visible[0].click()
-                    # 某些页面在新标签播放；短轮询用于发现页面，而非等待任务完成。
-                    for _ in range(6):
-                        pages = [p for p in self.context.pages if p not in before]
-                        if pages:
-                            old = self.page
-                            self.page = pages[-1]
-                            await self.page.wait_for_load_state('domcontentloaded')
-                            await old.close()
-                            break
-                        await asyncio.sleep(.25)
-                    return self.page
+            entry = await self.task_entry(task)
+            if entry is not None:
+                before = list(self.context.pages)
+                await entry.click()
+                # 某些页面在新标签播放；短轮询用于发现页面，而非等待任务完成。
+                for _ in range(6):
+                    pages = [p for p in self.context.pages if p not in before]
+                    if pages:
+                        old = self.page
+                        self.page = pages[-1]
+                        await self.page.wait_for_load_state('domcontentloaded')
+                        await old.close()
+                        break
+                    await asyncio.sleep(.25)
+                return self.page
             await asyncio.sleep(.5)
-        raise AdaptationRequired('课程页未找到唯一可见的任务名称；请检查章节折叠状态或配置已核验的路径模板')
+        raise AdaptationRequired('课程页未找到唯一可见的任务入口；已核对任务 ID 与名称，请检查章节折叠状态或页面变化')

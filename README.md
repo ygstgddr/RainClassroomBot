@@ -2,7 +2,9 @@
 
 基于 **Python + Playwright + Microsoft Edge + pywebview / WebView2** 的 Windows 桌面任务管理工具。按开课时间选择课程，扫描未完成任务，通过网页正常操作处理已适配的视频、图文和 PPT，并复查服务器完成记录。
 
-当前版本：**0.8.1**。需要 Windows 10/11 x64、Microsoft Edge 和 Microsoft Edge WebView2 Runtime。
+当前版本：**0.8.2**。需要 Windows 10/11 x64、Microsoft Edge 和 Microsoft Edge WebView2 Runtime。
+
+0.8.2 修复同名章节、图文、视频导致任务入口无法唯一定位的问题，使用任务 ID 核对后点击对应标题。更新后重新扫描，可恢复因此暂停的队列。
 
 日常操作只需 **选课程 → 点开始**。助手自动检查选课范围、扫描任务并继续执行；同一个主按钮负责开始、暂停和继续。
 
