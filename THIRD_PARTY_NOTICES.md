@@ -1,5 +1,9 @@
 # 第三方组件说明
 
+0.8.3 桌面材质设计参考 [Javis603/token-monitor](https://github.com/Javis603/token-monitor)（MIT，Copyright (c) 2026 Javis）的 Acrylic 与透明渲染分层思路，以及 Lens / Uiverse 玻璃视觉；实现为独立的 Python/ctypes 与 CSS，不内嵌上述项目的运行时代码。具体参考版本和链接见 `gui/web/DESIGN.md`。
+
+0.8.4 将 Token Monitor 的 `src/electron/windowsBackdrop.js` 中 Accent 配方移植为 Python/ctypes，以保留失焦透明效果。上游版本 `71ce5c6caed60f4f6afd3df16c2ca15d3c012c3a`；版权与完整 MIT 许可证保留在 `third_party_licenses/token-monitor/LICENSE.txt`。未引入 Electron 运行时或 Token Monitor 的账号、采集功能。
+
 本程序运行或打包使用 Python、Tcl/Tk、Pillow、Playwright（含其 driver/Node.js 组件）、PyYAML、psutil、greenlet、pyee、typing_extensions，以及 PyInstaller 引导程序。
 
 0.6.0 的默认桌面新增 pywebview 6.2.1，以及其实际安装的 pythonnet、clr_loader、bottle、proxy_tools、cffi、pycparser 等传递依赖。HTML/CSS/JavaScript 玻璃界面由本项目自行实现，不使用外部主题框架或 CDN。

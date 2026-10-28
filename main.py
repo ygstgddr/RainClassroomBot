@@ -60,6 +60,7 @@ def main():
     parser.add_argument('--demo', action='store_true', help='使用临时演示数据，不连接雨课堂')
     parser.add_argument('--self-check', action='store_true', help='检查配置和依赖，不打开账号')
     parser.add_argument('--classic', action='store_true', help='使用经典界面进行兼容性排查')
+    parser.add_argument('--opaque', action='store_true', help='关闭桌面透明效果，使用内置背景')
     args = parser.parse_args()
     config = load_config()
     if args.self_check:
@@ -106,8 +107,9 @@ def main():
             webview.settings['DRAG_REGION_DIRECT_TARGET_ONLY'] = True
             window = webview.create_window('雨课堂 · 智能任务管理助手' + (' · 演示' if args.demo else ''),
                 html=html, width=1280, height=850, min_size=(900, 660), background_color='#e7eaf4',
-                frameless=True, easy_drag=False, resizable=True, shadow=True)
+                frameless=True, easy_drag=False, resizable=True, shadow=False)
             ui.bind_window(window)
+            ui.window_frame.desktop_glass_enabled = not args.opaque
             # Expose only two narrow endpoints, rather than every public controller method.
             window.expose(ui.snapshot, ui.action)
             window.events.closing += ui.on_closing

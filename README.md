@@ -2,7 +2,11 @@
 
 基于 **Python + Playwright + Microsoft Edge + pywebview / WebView2** 的 Windows 桌面任务管理工具。按开课时间选择课程，扫描未完成任务，通过网页正常操作处理已适配的视频、图文和 PPT，并复查服务器完成记录。
 
-当前版本：**0.8.2**。需要 Windows 10/11 x64、Microsoft Edge 和 Microsoft Edge WebView2 Runtime。
+当前版本：**0.8.4**。需要 Windows 10/11 x64、Microsoft Edge 和 Microsoft Edge WebView2 Runtime。
+
+0.8.4 修复首次打开背景纯黑、失去焦点后玻璃背景变实色、窗口外围亮边及标题栏顶部细白线。优先使用 Accent Acrylic 保持前后台一致；该扩展接口不可用时回退到系统 Acrylic（失焦外观由系统决定）。关闭系统透明效果、高对比度及 `--opaque` 回退行为保留。
+
+0.8.3 新增真正透出桌面背景的深色毛玻璃、低对比灰色描边与半透明按钮。原生 Acrylic 需要 Windows 11 22H2 或更新版本并开启系统“透明效果”；旧系统、高对比度或关闭透明效果时自动使用内置背景。可运行 `RainClassroomBot.exe --opaque` 手动回退；源码启动使用 `python main.py --opaque`。本次升级需要同时替换 exe 与 `_internal`，不能只更新 CSS。
 
 0.8.2 修复同名章节、图文、视频导致任务入口无法唯一定位的问题，使用任务 ID 核对后点击对应标题。更新后重新扫描，可恢复因此暂停的队列。
 
@@ -24,7 +28,7 @@
 
 | 功能 | 说明 |
 |---|---|
-| 通透玻璃桌面 | 彩色光团背景透过半透明卡片，CSS 背景模糊与高光描边形成玻璃层次；课程、任务、设置和记录使用统一风格 |
+| 通透玻璃桌面 | Windows 11 原生 Acrylic 模糊并透出后方桌面/窗口；正文保持完全不透明，卡片和按钮使用柔和灰边与半透明色底；不支持时回退到静态曲面背景 |
 | 内置窗口标题栏 | 顶部 44px 玻璃标题栏，右上角从左到右为黄色最小化、绿色最大化/还原、红色关闭；空白区拖动、双击最大化，边缘及四角调整大小 |
 | 雨课堂图标 | 使用官网原始图标，统一侧栏、标题栏、Windows 窗口、任务栏与 exe 图标；图片随程序提供 |
 | 交互动画 | 页面淡入、按钮悬停与按压、课程勾选、菜单和设置弹层过渡；支持系统“减少动态效果”设置 |
@@ -53,7 +57,7 @@
 ## 安装：直接运行 Windows 版本
 
 1. 安装 Microsoft Edge，并确认已安装 **Microsoft Edge WebView2 Runtime**。若缺少运行时，从 [Microsoft 官方下载页](https://developer.microsoft.com/en-us/microsoft-edge/webview2/consumer/)安装 Evergreen WebView2 Runtime 后再打开助手。
-2. 打开 [Releases](https://github.com/ygstgddr/RainClassroomBot/releases/latest)，下载 **RainClassroomBot-Windows-x64.zip**。
+2. 打开 [Releases](https://github.com/ygstgddr/RainClassroomBot/releases/latest)，下载 **RainClassroomBot-0.8.4-Windows-x64.zip**。
 3. 完整解压到有写入权限的目录，例如 `D:\Apps\RainClassroomBot`。
 4. 运行目录内的 `RainClassroomBot.exe`。此方式不需要安装 Python。
 

@@ -179,3 +179,322 @@ body.window-controls-connected:not(.window-is-maximized) .window-resize-edge{dis
 .resize-ne,.resize-nw,.resize-se,.resize-sw{width:12px;height:12px}
 .resize-ne{top:0;right:0;cursor:nesw-resize}.resize-nw{top:0;left:0;cursor:nwse-resize}
 .resize-se{bottom:0;right:0;cursor:nwse-resize}.resize-sw{bottom:0;left:0;cursor:nesw-resize}
+
+/* Frosted lens material — original implementation informed by Lens and
+   codebykay101's layered glass card. See gui/web/DESIGN.md.
+   Keep the wallpaper static: many backdrop-filter cards must not force a
+   full-window repaint on every animation frame while learning runs. */
+:root {
+  --ink: #20334b;
+  --muted: #52647b;
+  --glass: rgba(250, 253, 255, .22);
+  --line: rgba(132, 151, 173, .32);
+  --lens-filter: blur(18px) saturate(125%);
+  --lens-light: linear-gradient(135deg, rgba(255,255,255,.32), rgba(255,255,255,.04) 46%, rgba(255,255,255,.14));
+  --shadow: inset 0 1px 0 rgba(255,255,255,.94), inset 1px 0 0 rgba(255,255,255,.4), inset 0 -1px 0 rgba(74,101,135,.09), 0 8px 24px -14px rgba(36,60,98,.28);
+}
+.wallpaper {
+  background: linear-gradient(125deg, #dae8ef, #e0e9f5 48%, #eae3ee);
+}
+.wallpaper::after {
+  background: linear-gradient(120deg, rgba(255,255,255,.23), transparent 42%, rgba(255,255,255,.1));
+}
+.orb {
+  animation: none;
+  will-change: auto;
+  filter: blur(6px);
+  opacity: .9;
+  border-radius: 50%;
+  box-shadow: inset 0 2px 3px rgba(255,255,255,.48), 0 20px 60px rgba(49,93,136,.08);
+}
+.orb-blue {
+  width: 115vw; height: 65vh; left: -12vw; top: -25vh;
+  transform: rotate(-23deg);
+  background: linear-gradient(180deg, #e5f2fc 5%, #a9d0ec 58%, #7cb3dc 96%, #d4e9f8);
+}
+.orb-violet {
+  width: 86vw; height: 51vh; right: -34vw; top: 22vh;
+  transform: rotate(-39deg);
+  background: linear-gradient(180deg, #e5e6fb, #b6b4e2 70%, #9e9dd1 96%, #d6d6ef);
+}
+.orb-peach {
+  width: 105vw; height: 63vh; left: -28vw; bottom: -37vh;
+  transform: rotate(-24deg);
+  background: linear-gradient(180deg, #f9ede3, #edc5b2 68%, #dca58e);
+}
+.orb-mint {
+  width: 91vw; height: 47vh; right: -30vw; bottom: -32vh;
+  transform: rotate(-24deg);
+  background: linear-gradient(180deg, #daeeec, #93bbb9);
+}
+.grain { opacity: .022; }
+
+/* One material for every major surface; opacity belongs to the background,
+   never to the panel itself or its text. Nested fields need no extra blur. */
+.glass, .sidebar, .hero, .metric, .filter-bar, .course-card, .task-row,
+.typing-workspace, .activity-list {
+  background-color: var(--glass);
+  background-image: var(--lens-light);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  backdrop-filter: var(--lens-filter);
+  -webkit-backdrop-filter: var(--lens-filter);
+}
+.sidebar {
+  background-color: rgba(246,251,255,.3);
+  box-shadow: var(--shadow), 12px 16px 40px -28px rgba(42,73,108,.3);
+}
+.hero {
+  /* Keep above cards: backdrop filtering creates an independent stack. */
+  z-index: 3;
+  background-color: rgba(247,252,255,.2);
+}
+.hero::before { left: 20px; right: 20px; }
+.course-card::before { background: none; }
+.course-card:hover, .task-row:hover {
+  background-color: rgba(255,255,255,.36);
+  box-shadow: var(--shadow), 0 15px 30px -18px rgba(34,69,108,.3);
+  border-color: rgba(255,255,255,.98);
+}
+.course-card.is-selected {
+  background-color: rgba(217,237,255,.38);
+  background-image: var(--lens-light);
+  border-color: #6c9ed0;
+  box-shadow: var(--shadow), inset 0 0 0 1px rgba(66,130,194,.19);
+}
+.course-card.is-disabled { opacity: 1; }
+.course-card.is-disabled .course-check { opacity: .55; }
+.course-card:disabled { opacity: 1; box-shadow: var(--shadow)!important; }
+.nav-button { color: #465d76; }
+.nav-button.is-active {
+  color: #145fae;
+  background: linear-gradient(130deg, rgba(255,255,255,.67), rgba(245,252,255,.26));
+  box-shadow: var(--shadow);
+}
+.glass-button {
+  color: #385778;
+  background: linear-gradient(140deg, rgba(255,255,255,.5), rgba(255,255,255,.15));
+  border-color: rgba(255,255,255,.85);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.glass-button:hover { background: rgba(255,255,255,.58); }
+.primary-button {
+  background: linear-gradient(155deg, #3587e0, #1665b9);
+  border-color: rgba(235,248,255,.65);
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.6), inset 0 -1px 0 rgba(14,58,108,.2), 0 7px 18px -6px rgba(23,84,150,.4);
+}
+.primary-button:hover { background: linear-gradient(155deg, #2c7ed6, #105cac); }
+.primary-button.is-pause { background: linear-gradient(155deg, #507ea9, #375f8b); }
+
+/* Popovers use thicker frost so underlying text does not show through. */
+.menu, .modal, .toast {
+  background-color: rgba(242,248,253,.91);
+  background-image: var(--lens-light);
+  backdrop-filter: blur(24px) saturate(115%);
+  -webkit-backdrop-filter: blur(24px) saturate(115%);
+  box-shadow: var(--shadow), 0 20px 45px -16px rgba(28,53,86,.32);
+}
+.menu button { color: #344e6b; font-size: 12px; }
+.menu { background-color: rgba(242,248,253,.98); }
+.menu button:hover { background: rgba(255,255,255,.8); }
+.modal-overlay { background: rgba(31,49,73,.17); }
+.window-titlebar {
+  background: linear-gradient(110deg, rgba(250,254,255,.45), rgba(250,254,255,.16));
+  /* The native frame already defines the edge; no bright inset top rule. */
+  box-shadow: none;
+  backdrop-filter: blur(18px) saturate(120%);
+  -webkit-backdrop-filter: blur(18px) saturate(120%);
+}
+
+/* Legible task descriptions and state labels on the tinted wallpaper. */
+.hero p, .hero-meta, .section-heading p, .title-count,
+.metric small, .metric em, .task-type, .task-progress, .task-info p,
+.breadcrumb, .subtle-button, .connection-card, .connection-card small,
+.account-card small, .brand-sub, .nav-caption, .version, .app-footer {
+  color: var(--muted);
+}
+.hero p { font-size: 13px; }
+.hero-meta { font-size: 11px; }
+.section-heading p { font-size: 12px; }
+.metric small { font-size: 12px; }
+.task-info h3 { font-size: 15px; line-height: 1.6; color: var(--ink); white-space: normal; overflow-wrap: anywhere; }
+.task-info p { font-size: 12px; line-height: 1.7; white-space: normal; overflow-wrap: anywhere; }
+.task-progress strong { color: var(--muted); font-size: 12px; }
+.task-type, .task-progress { font-size: 12px; }
+.task-row { min-height: 82px; }
+.task-row .pill { font-size: 11px; padding: 4px 8px; }
+.pill.pending { color: #3c6085; background: rgba(225,238,250,.72); }
+.pill.running { color: #155ca6; background: rgba(212,231,254,.8); }
+.pill.manual, .pill.needs_adapter { color: #76551b; background: rgba(250,238,207,.78); }
+.pill.failed { color: #983c32; background: rgba(255,226,219,.8); }
+.pill.completed { color: #22654c; background: rgba(219,242,229,.8); }
+.search-field input, .select-field select, .toggle-label { font-size: 12px; }
+.search-field input::placeholder { color: #5c7087; }
+.segmented button, .toggle-label { color: #4c627a; }
+.segmented button.is-active { color: #155ba5; background: rgba(255,255,255,.7); }
+.typing-target-card, #typing-source {
+  background: rgba(249,253,255,.35);
+  border-color: rgba(255,255,255,.86);
+  box-shadow: inset 0 1px 3px rgba(45,72,103,.04), 0 1px 0 rgba(255,255,255,.4);
+}
+.typing-target-card.is-confirmed { background: rgba(221,245,235,.5); border-color: #83b9a7; }
+.typing-steps li { background: rgba(255,255,255,.26); color: #4c6179; }
+.typing-steps li.is-active { background: rgba(216,236,255,.55); color: #1e5f9f; }
+@media(max-width:1000px) {
+  .task-row { grid-template-columns: 32px minmax(0,1fr) 94px 52px; }
+  .task-type { display: none; }
+  .task-info h3 { font-size: 14px; }
+  .task-info p { font-size: 12px; }
+  .hero-meta { font-size: 10px; }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .glass, .glass-button { background: #edf3f8; }
+}
+@media(prefers-reduced-transparency:reduce) {
+  .glass, .glass-button, .window-titlebar { background: #edf3f8; backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+@media(forced-colors:active) {
+  .glass, .glass-button, .course-card, .task-row, .window-titlebar, #typing-source, .typing-target-card {
+    background: Canvas; border-color: CanvasText; box-shadow: none!important;
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+  }
+  .primary-button { background: Highlight; color: HighlightText; }
+  .course-card.is-selected { border: 2px solid Highlight; }
+}
+
+/* The native bridge adds this class only after DWM succeeds. Without a native
+   window the existing wallpaper is retained. Alpha is never applied to text. */
+html.desktop-glass {
+  background: transparent;
+  color-scheme: dark;
+  --ink: #f7f9fc;
+  --muted: #b2bccb;
+  --glass: rgba(8,14,24,.18);
+  --line: rgba(164,177,193,.12);
+  --lens-light: none;
+  --shadow: none;
+}
+.desktop-glass body { background: rgba(13,19,29,.16); color: var(--ink); }
+.desktop-glass .wallpaper { display: none; }
+.desktop-glass .glass, .desktop-glass .glass-button {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.desktop-glass .sidebar { background: rgba(5,11,20,.28); border-color: transparent; }
+.desktop-glass .hero { background: rgba(5,11,20,.2); border-color: transparent; }
+.desktop-glass .window-titlebar { background: rgba(12,18,28,.12); border-color: rgba(158,171,188,.075); }
+.desktop-glass .course-card { border-color: transparent; background: rgba(5,11,20,.24); }
+.desktop-glass .course-card:hover, .desktop-glass .task-row:hover { background-color: rgba(110,147,176,.1); border-color: transparent; box-shadow: none; }
+.desktop-glass .course-card.is-selected, .desktop-glass .task-row.is-running {
+  background: linear-gradient(130deg, rgba(50,100,143,.18), rgba(9,23,39,.26));
+  border-color: transparent;
+  box-shadow: inset 2px 0 0 rgba(123,178,213,.65);
+}
+.desktop-glass .course-card h3, .desktop-glass .task-info h3,
+.desktop-glass .typing-tool-heading h3, .desktop-glass .typing-target-heading h4,
+.desktop-glass .typing-field-heading label { color: var(--ink); }
+.desktop-glass .nav-button, .desktop-glass .window-title-drag, .desktop-glass .window-caption,
+.desktop-glass .breadcrumb strong, .desktop-glass .hero-meta>span:first-child,
+.desktop-glass .eyebrow, .desktop-glass .course-date, .desktop-glass .course-selected-note,
+.desktop-glass .text-button.muted, .desktop-glass .progress-head, .desktop-glass .task-retry,
+.desktop-glass .tools-heading p, .desktop-glass .typing-tool-heading p,
+.desktop-glass .typing-field-heading, .desktop-glass .typing-source-footer,
+.desktop-glass .typing-target-heading div>span, .desktop-glass .typing-target-card>p,
+.desktop-glass .typing-target-card dt, .desktop-glass .typing-target-card dd,
+.desktop-glass .typing-speed-control>p, .desktop-glass .typing-output-progress>p,
+.desktop-glass .typing-field-heading strong, .desktop-glass .typing-bottom-note,
+.desktop-glass .typing-state-pill, .desktop-glass .modal>p, .desktop-glass .form-label,
+.desktop-glass .settings-note, .desktop-glass .activity-time, .desktop-glass .activity-message,
+.desktop-glass .empty-state, .desktop-glass .empty-state p { color: var(--muted); }
+.desktop-glass #page-courses .section-heading p, .desktop-glass #page-courses .title-count { color: var(--muted); }
+.desktop-glass .nav-button.is-active, .desktop-glass .segmented button.is-active {
+  color: #d4e8ff; background: rgba(128,184,255,.16); box-shadow: var(--shadow);
+}
+.desktop-glass .nav-button:hover { color: #fff; background: rgba(255,255,255,.08); }
+.desktop-glass .glass-button, .desktop-glass .site-history button {
+  background: rgba(175,197,220,.055); border-color: var(--line); color: #e2edf8;
+}
+.desktop-glass .glass-button:hover { background: rgba(255,255,255,.14); }
+.desktop-glass .subtle-button, .desktop-glass .text-button,
+.desktop-glass .course-card.is-selected .course-selected-note { color: #b2d4ff; }
+.desktop-glass .search-field input::placeholder, .desktop-glass #typing-source::placeholder { color: #b7c5d6; }
+.desktop-glass .segmented button, .desktop-glass .toggle-label { color: var(--muted); }
+.desktop-glass .select-field select, .desktop-glass .site-input-row input,
+.desktop-glass #typing-source { background-color: rgba(10,18,29,.2); border-color: var(--line); color: var(--ink); }
+.desktop-glass .select-field option { background: #283445; color: var(--ink); }
+.desktop-glass .typing-target-card, .desktop-glass .typing-steps li,
+.desktop-glass .typing-state-pill, .desktop-glass .typing-speed-presets button,
+.desktop-glass .typing-output-progress { background: rgba(255,255,255,.045); border-color: var(--line); color: var(--muted); }
+.desktop-glass .typing-steps li.is-active { background: rgba(99,162,238,.18); color: #d4e8ff; }
+.desktop-glass .typing-steps li>span { background: rgba(255,255,255,.12); color: #d5e7fa; }
+.desktop-glass .tools-local-badge { color: #b6ebd5; background: rgba(122,185,166,.1); }
+.desktop-glass .typing-speed-presets button.is-active { color: #cce4ff; background: rgba(99,162,238,.18); }
+.desktop-glass .typing-target-card.is-confirmed { border-color: #80bdab; }
+.desktop-glass .menu, .desktop-glass .modal, .desktop-glass .toast { background: rgba(34,44,60,.97); color: var(--ink); }
+.desktop-glass .menu button { color: var(--ink); }
+.desktop-glass .menu button:hover { background: rgba(255,255,255,.1); }
+.desktop-glass .pill.pending { color: #d3e5fc; background: rgba(120,160,210,.18); }
+.desktop-glass .pill.running { color: #b5d8ff; background: rgba(75,145,238,.22); }
+.desktop-glass .pill.manual, .desktop-glass .pill.needs_adapter { color: #f6d6a0; background: rgba(181,135,60,.23); }
+.desktop-glass .pill.failed { color: #ffbdb3; background: rgba(186,79,63,.23); }
+.desktop-glass .pill.completed, .desktop-glass .course-card .pill.current { color: #b6ebd5; background: rgba(67,147,112,.23); }
+.desktop-glass .course-card .pill { color: #d5e0ef; }
+.desktop-glass .blue { color: #a9d1ff; }.desktop-glass .violet { color: #d7bfff; }
+.desktop-glass .green { color: #a8dfcb; }.desktop-glass .amber { color: #f1c992; }
+.desktop-glass .avatar, .desktop-glass .nav-number { background: rgba(255,255,255,.1); color: #d3e2f5; border-color: var(--line); }
+.desktop-glass .course-symbol, .desktop-glass .task-symbol, .desktop-glass .metric-icon,
+.desktop-glass .course-check, .desktop-glass .tools-local-badge, .desktop-glass .typing-emblem,
+.desktop-glass .typing-target-symbol { border-color: var(--line); }
+.desktop-glass .course-bottom, .desktop-glass .account-card { border-color: var(--line); }
+.desktop-glass .hero::before { display: none; }
+.desktop-glass .primary-button, .desktop-glass .primary-button.is-pause {
+  background: linear-gradient(150deg, rgba(78,153,202,.29), rgba(48,105,148,.2));
+  border: 1px solid rgba(150,181,205,.16);
+  box-shadow: 0 5px 14px -9px rgba(0,0,0,.35);
+  color: #f2f8ff;
+}
+.desktop-glass .primary-button:hover {
+  background: linear-gradient(150deg, rgba(101,176,216,.37), rgba(73,142,186,.26));
+  border-color: rgba(163,193,217,.42);
+  box-shadow: inset 0 1px 0 rgba(221,238,251,.1), 0 7px 18px -10px rgba(0,0,0,.35);
+}
+.desktop-glass .primary-button:active { background: rgba(71,131,169,.24); box-shadow: inset 0 1px 4px rgba(13,28,40,.13); }
+.desktop-glass .glass-button:hover { border-color: rgba(158,177,196,.32); }
+.desktop-glass .nav-button.is-active, .desktop-glass .segmented button.is-active {
+  background: rgba(140,177,202,.12); color: #d7e9f7;
+}
+.desktop-glass .brand-mark, .desktop-glass .course-check, .desktop-glass .segmented { border-color: var(--line); }
+.desktop-glass .brand-mark { background: rgba(219,232,245,.05); box-shadow: none; }
+.desktop-glass .course-card.is-selected .course-check { background: rgba(95,157,198,.42); border-color: rgba(154,183,204,.35); box-shadow: none; }
+.desktop-glass .toggle-label input:checked+.toggle-track { background: rgba(98,160,197,.6); }
+.desktop-glass .progress-track { background: rgba(18,27,39,.27); }
+.desktop-glass .progress-fill, .desktop-glass .task-row.is-running .task-progress .progress-fill {
+  background: linear-gradient(90deg, rgba(87,177,190,.72), rgba(114,192,198,.64));
+}
+.desktop-glass .typing-target-card, .desktop-glass #typing-source,
+.desktop-glass .typing-steps li, .desktop-glass .typing-bottom-note,
+.desktop-glass .typing-target-symbol, .desktop-glass .typing-steps li.is-active { border-color: var(--line); }
+.desktop-glass #typing-source { box-shadow: inset 0 1px 4px rgba(12,23,37,.12); }
+.desktop-glass #typing-source:focus { border-color: rgba(132,178,207,.48); box-shadow: 0 0 0 2px rgba(115,165,197,.1); }
+.desktop-glass .metrics { gap: 0; margin-top: 20px; margin-bottom: 30px; }
+.desktop-glass .metric { background: transparent; border: 0; border-radius: 0; box-shadow: none; }
+.desktop-glass .metric+.metric { border-left: 1px solid var(--line); }
+.desktop-glass .metric strong { color: #f7f9fc; font-weight: 650; }
+.desktop-glass .metric-icon { background: transparent; border: 0; }
+.desktop-glass .filter-bar { background: rgba(5,11,20,.19); border-color: transparent; }
+.desktop-glass .task-list { gap: 0; padding: 0; margin: 1px 1px 12px; border-radius: 18px; overflow: hidden; background: rgba(5,11,20,.24); }
+.desktop-glass .task-row { background: transparent; border: 0; border-bottom: 1px solid rgba(165,180,198,.09); border-radius: 0; box-shadow: none; }
+.desktop-glass .task-row:last-child { border-bottom: 0; }
+.desktop-glass .task-row.is-running { background: rgba(92,153,186,.065); box-shadow: inset 2px 0 0 rgba(123,178,213,.6); }
+.desktop-glass .task-row:hover { transform: none; }
+.desktop-glass .typing-workspace { background: rgba(5,11,20,.24); border-color: transparent; }
+.desktop-glass .typing-target-card { background: rgba(5,11,20,.22); border-color: transparent; }
+.desktop-glass .course-bottom, .desktop-glass .account-card { border-color: rgba(164,177,193,.09); }
+@media(prefers-reduced-transparency:reduce) { .desktop-glass body { background: #243143; } }
+@media(forced-colors:active) {
+  .desktop-glass body, .desktop-glass .glass, .desktop-glass .glass-button,
+  .desktop-glass .window-titlebar, .desktop-glass #typing-source { background: Canvas; color: CanvasText; }
+  .desktop-glass { --ink: CanvasText; --muted: CanvasText; }
+}

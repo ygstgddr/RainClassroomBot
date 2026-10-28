@@ -51,6 +51,8 @@ class WindowFrame:
         self._subclass_callback = None
         self._native = None
         self._user32 = None
+        self.desktop_glass_enabled = True
+        self._backdrop = None
         events = getattr(window, 'events', None)
         if events:
             events.shown += self.on_shown
@@ -64,8 +66,11 @@ class WindowFrame:
                 # WinForms resize events dispatch on background threads; read
                 # the native flag to avoid a late event reversing a fast toggle.
                 self._maximized = bool(self._user32.IsZoomed(self._native))
-            return {'maximized': self._maximized,
-                    'native_controls': self._ready and not self._closed}
+            state = {'maximized': self._maximized,
+                     'native_controls': self._ready and not self._closed}
+            if self._backdrop and self._backdrop.active:
+                state['desktop_glass'] = True
+            return state
 
     def on_shown(self, *args):
         if os.name == 'nt':
@@ -196,6 +201,10 @@ class WindowFrame:
             try:
                 if message == 0x0083:  # WM_NCCALCSIZE
                     return 0
+                if message == 0x0085:  # WM_NCPAINT: HTML owns every frame pixel.
+                    return 0
+                if message == 0x0086:  # Keep native activation, skip frame repaint.
+                    return comctl32.DefSubclassProc(hwnd, message, wparam, -1)
                 if message == 0x0046 and user32.IsZoomed(hwnd):  # WM_WINDOWPOSCHANGING
                     position = ctypes.cast(lparam, ctypes.POINTER(WindowPosition)).contents
                     if position.flags & 0x0001 and not position.flags & 0x0002:
@@ -280,5 +289,23 @@ class WindowFrame:
                 dwm.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(border), ctypes.sizeof(border))
             except (AttributeError, OSError):
                 pass
+            if self.desktop_glass_enabled:
+                try:
+                    from gui.desktop_backdrop import DesktopBackdrop
+                    self._backdrop = DesktopBackdrop()
+                    if self._backdrop.apply(native):
+                        # The first activation predates this subclass/material.
+                        # Recalculate nonclient composition, then restore the
+                        # actual activation state. This never moves input focus.
+                        user32.GetForegroundWindow.restype = wintypes.HWND
+                        user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+                        user32.SendMessageW.restype = result_type
+                        user32.SendMessageW(hwnd, 0x0086, 0, -1)
+                        user32.SendMessageW(hwnd, 0x0086,
+                            int(user32.GetForegroundWindow() == hwnd), -1)
+                except Exception:
+                    # Material support must not disable resize/window controls.
+                    import logging
+                    logging.getLogger(__name__).exception('Unable to enable desktop glass')
         self._invoke(configure)
         self._prepare_work_area()

@@ -62,6 +62,8 @@
     const closing = ui.snapshot && ui.snapshot.state.phase === 'closing';
     document.body.classList.toggle('window-is-maximized', maximized);
     document.body.classList.toggle('window-controls-connected', available);
+    const desktopGlass = Boolean(available && ui.snapshot.window.desktop_glass);
+    document.documentElement.classList.toggle('desktop-glass', desktopGlass);
     $('window-maximize').querySelector('path').setAttribute('d', maximized ? 'M2 4h6v6H2zM4 4V2h6v6H8' : 'M3 1H1v2M9 1h2v2M1 9v2h2M11 9v2H9');
     const labels = { 'window-close': '关闭工作台', 'window-minimize': '最小化工作台', 'window-maximize': maximized ? '还原窗口' : '最大化工作台' };
     for (const [id, label] of Object.entries(labels)) {
@@ -610,7 +612,7 @@
       { id: 'demo-t4', course_name: '艺术鉴赏与生活美学', title: '如何欣赏一幅画', type: 'video', type_label: '视频观看', status: 'completed', status_label: '服务器已确认', progress: 1 },
       { id: 'demo-t5', course_name: '大学英语（三）', title: 'Unit 3 · 课堂作业', type: 'manual', type_label: '作业提交', status: 'manual', status_label: '人工处理', progress: null },
     ];
-    return { demo: true, version: '0.8.2', site: { label: '长江雨课堂', url: 'https://changjiang.yuketang.cn/web', history: [{ label: '雨课堂', url: 'https://www.yuketang.cn/v2/web' }, { label: '长江雨课堂', url: 'https://changjiang.yuketang.cn/web' }] }, account: { name: '演示同学', logged_in: true }, state: { phase: 'idle', busy: false, selection_locked: false, message: '课程选择已保存。直接点击开始，自动扫描并安排学习任务。', primary: { label: '开始学习', action: 'start', enabled: true } }, counts: { courses: courses.length, selected: 3, tasks: tasks.length, completed: 1, pending: 3, errors: 0 }, courses, tasks, logs: [{ time: '10-13 15:24:12', level: '服务器已确认', course: '艺术鉴赏与生活美学', task: '如何欣赏一幅画', message: '任务完成状态已同步。' }, { time: '10-13 15:23:48', level: '扫描完成', message: '所选课程任务已加入队列。' }], scan_errors: [], progress: { current: 1, total: 5, percent: 20, label: '学习进度' }, filters: { task_type: 'all', unfinished_only: true } };
+    return { demo: true, version: '0.8.4', site: { label: '长江雨课堂', url: 'https://changjiang.yuketang.cn/web', history: [{ label: '雨课堂', url: 'https://www.yuketang.cn/v2/web' }, { label: '长江雨课堂', url: 'https://changjiang.yuketang.cn/web' }] }, account: { name: '演示同学', logged_in: true }, state: { phase: 'idle', busy: false, selection_locked: false, message: '课程选择已保存。直接点击开始，自动扫描并安排学习任务。', primary: { label: '开始学习', action: 'start', enabled: true } }, counts: { courses: courses.length, selected: 3, tasks: tasks.length, completed: 1, pending: 3, errors: 0 }, courses, tasks, logs: [{ time: '10-13 15:24:12', level: '服务器已确认', course: '艺术鉴赏与生活美学', task: '如何欣赏一幅画', message: '任务完成状态已同步。' }, { time: '10-13 15:23:48', level: '扫描完成', message: '所选课程任务已加入队列。' }], scan_errors: [], progress: { current: 1, total: 5, percent: 20, label: '学习进度' }, filters: { task_type: 'all', unfinished_only: true } };
   }
   async function demoAction(name, payload) {
     if (name.startsWith('typing_')) return { ok: false, message: '演示工具不会向网页输出。请在正式程序中选择真实目标。' };
