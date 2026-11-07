@@ -83,10 +83,12 @@ def main():
     if args.demo:
         demo_data(store)
     else:
-        # 启动先读取课程时间，用户确认选课后才扫描章节。崩溃恢复保留原命令。
-        store = prepare_site(config)
-        watchdog = Watchdog(config)
-        watchdog.start()
+        # 默认界面只准备本地状态；点击登录才创建浏览器和读取课程。
+        # 经典界面保留原启动方式，用于兼容性排查。
+        store = prepare_site(config, connect=args.classic)
+        if args.classic:
+            watchdog = Watchdog(config)
+            watchdog.start()
     ui = None
     try:
         if args.classic:
@@ -99,7 +101,8 @@ def main():
         else:
             import webview
             from gui.web_interface import WebInterface
-            ui = WebInterface(store, watchdog, args.demo, base_config=base_config)
+            ui = WebInterface(store, watchdog, args.demo, base_config=base_config,
+                              defer_login=not args.demo)
             from gui.web_assets import load_document
             html = load_document()
             # Only the explicit title-bar region may move the window. Inputs,
@@ -108,7 +111,7 @@ def main():
             window = webview.create_window('雨课堂 · 智能任务管理助手' + (' · 演示' if args.demo else ''),
                 html=html, width=1280, height=850, min_size=(900, 660), background_color='#e7eaf4',
                 frameless=True, easy_drag=False, resizable=True, shadow=False)
-            ui.bind_window(window)
+            ui.bind_window(window, embedded=not args.demo, separate_typing=True)
             ui.window_frame.desktop_glass_enabled = not args.opaque
             # Expose only two narrow endpoints, rather than every public controller method.
             window.expose(ui.snapshot, ui.action)

@@ -107,6 +107,8 @@ async def worker_async(config):
     store.recover()
     store.set('worker_busy', False)
     browser = EdgeManager(config)
+    if browser.embedded:
+        store.set('browser_media', {})
 
     async def pulse():
         while True:
@@ -114,11 +116,17 @@ async def worker_async(config):
             await asyncio.sleep(1)
 
     async def probe():
+        last_media = {}
         while True:
             try:
                 if browser.page and not browser.page.is_closed():
                     await asyncio.wait_for(browser.page.evaluate('() => document.readyState'), 8)
                     store.set('page_heartbeat', time.time())
+                    if browser.embedded:
+                        media = await browser.media_snapshot()
+                        if media != last_media:
+                            store.set('browser_media', media)
+                            last_media = media
             except Exception:
                 pass  # 导航时上下文被替换属正常情况；长时间失败由 Watchdog 处理。
             await asyncio.sleep(3)
@@ -137,6 +145,8 @@ async def worker_async(config):
         await browser.pause_media()
         previous = None
         while store.get('desired') != 'shutdown':
+            if browser.embedded and (not browser.cdp_browser.is_connected() or browser.page.is_closed()):
+                raise RuntimeError('内置浏览器连接已断开')
             await typing.drain()
             desired = store.get('desired', 'idle')
             if desired not in ('idle', 'paused') and typing.active:

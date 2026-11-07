@@ -12,4 +12,5 @@ Copy-Item -LiteralPath README.md,ADAPTER_NOTES.md,VALIDATION.md,VERSION.txt,CHAN
 Copy-Item -LiteralPath docs -Destination dist\RainClassroomBot -Recurse -Force
 & .\.venv\Scripts\python.exe scripts\collect_licenses.py dist\RainClassroomBot\third_party_licenses
 if ($LASTEXITCODE -ne 0) { throw 'Third-party license collection failed.' }
+Copy-Item -Path third_party_licenses\* -Destination dist\RainClassroomBot\third_party_licenses -Recurse -Force
 Write-Output 'Build ready: dist\RainClassroomBot\RainClassroomBot.exe'

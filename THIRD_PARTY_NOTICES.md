@@ -1,5 +1,7 @@
 # 第三方组件说明
 
+0.8.5 安装包由 [Inno Setup](https://jrsoftware.org/) 6.7.3 构建，许可证保存在 `third_party_licenses/inno-setup/LICENSE.txt`。简体中文安装文本来自其[官方源码库](https://github.com/jrsoftware/issrc/blob/main/Files/Languages/ChineseSimplified.isl)，保留文件头中的作者信息。构建工具本身不随应用安装。
+
 0.8.3 桌面材质设计参考 [Javis603/token-monitor](https://github.com/Javis603/token-monitor)（MIT，Copyright (c) 2026 Javis）的 Acrylic 与透明渲染分层思路，以及 Lens / Uiverse 玻璃视觉；实现为独立的 Python/ctypes 与 CSS，不内嵌上述项目的运行时代码。具体参考版本和链接见 `gui/web/DESIGN.md`。
 
 0.8.4 将 Token Monitor 的 `src/electron/windowsBackdrop.js` 中 Accent 配方移植为 Python/ctypes，以保留失焦透明效果。上游版本 `71ce5c6caed60f4f6afd3df16c2ca15d3c012c3a`；版权与完整 MIT 许可证保留在 `third_party_licenses/token-monitor/LICENSE.txt`。未引入 Electron 运行时或 Token Monitor 的账号、采集功能。

@@ -4,14 +4,21 @@
 (() => {
   'use strict';
   const $ = (id) => document.getElementById(id);
-  const pageNames = { courses: '我的课程', tasks: '任务队列', activity: '运行记录', tools: '其他功能' };
+  const typingWindow = document.documentElement.classList.contains('typing-window');
+  const pageNames = { courses: '我的课程', tasks: '任务队列', activity: '运行记录', browser: '浏览器', tools: '其他功能' };
   const stateNames = { pending: '等待处理', running: '进行中', completed: '服务器已确认', manual: '人工处理', locked: '尚未开放', needs_adapter: '待适配', failed: '需要重试' };
   const typeNames = { video: '视频观看', article: '图文阅读', slides: 'PPT / 课件', homework: '作业提交', exam: '测试 / 考试', quiz: '测验', manual: '其他任务' };
   const ui = { page: 'courses', courseFilter: 'all', courseSearch: '', taskSearch: '', taskType: 'all', unfinishedOnly: true, activityTab: 'logs', pending: false, windowPending: false, connected: false, snapshot: null, modalReturnFocus: null, navigationToken: 0, confirmedTarget: '', typingTarget: '', typingSpeedDirty: false };
   const courseNodes = new Map();
   const taskNodes = new Map();
+  const selectedTasks = new Set();
+  let taskGroup = 'automatic', taskAccountScope = '';
+  const taskAutomatic = (t) => t.execution_group ? t.execution_group === 'automatic' : ['video', 'article', 'slides'].includes(t.type) && !['manual', 'needs_adapter'].includes(t.status);
+  const taskSelectable = (t) => t.selectable ?? (taskAutomatic(t) && ['pending', 'failed'].includes(t.status));
+  const taskHidden = (t) => t.hidden_until_open === true || (t.status === 'locked' && (t.type === 'homework' || /作业/.test(t.type_label || '')));
   const fingerprints = { courses: '', tasks: '', activity: '', history: '' };
   let pollTimer = null, pollRunning = false, snapshotPromise = null, pollGeneration = 0, toastTimer = null, errorsInRow = 0, filtersInitialized = false;
+  let browserRect, browserLayoutFrame = 0, browserLayoutCall = Promise.resolve();
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const asText = (value) => value === null || value === undefined ? '' : String(value);
   const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -23,6 +30,7 @@
   const actionButton = (label, action, symbol) => { const node = make('button', 'glass-button compact-button'); node.type = 'button'; node.dataset.action = action; if (symbol) node.appendChild(icon(symbol)); node.appendChild(make('span', '', label)); return node; };
   const hasAPI = () => Boolean(window.pywebview && window.pywebview.api && typeof window.pywebview.api.snapshot === 'function' && typeof window.pywebview.api.action === 'function');
   const locked = () => ui.pending || Boolean(ui.snapshot && (ui.snapshot.state.selection_locked ?? ui.snapshot.state.busy));
+  const loginGate = () => !ui.snapshot || ui.snapshot.state.login_gate === true;
 
   function normalize(raw) {
     raw = raw && typeof raw === 'object' ? raw : {};
@@ -40,6 +48,9 @@
     ui.snapshot = snapshot;
     ui.connected = true;
     errorsInRow = 0;
+    if (typingWindow) { renderTools(); renderWindowFrame(); return; }
+    $('typing-launcher').hidden = !snapshot.separate_typing;
+    $('typing-editor').hidden = Boolean(snapshot.separate_typing);
     if (!filtersInitialized) {
       ui.taskType = snapshot.filters.task_type || 'all';
       ui.unfinishedOnly = snapshot.filters.unfinished_only !== false;
@@ -47,13 +58,108 @@
       $('unfinished-only').checked = ui.unfinishedOnly;
       filtersInitialized = true;
     }
+    renderLogin();
+    renderBrowser();
     renderHeader();
     renderCourses();
     renderTasks();
     renderActivity();
-    renderTools();
+    if (!snapshot.separate_typing) renderTools();
     renderWindowFrame();
     syncDisabled();
+  }
+
+  function renderBrowser() {
+    const s = ui.snapshot, b = s?.browser || {};
+    document.querySelector('[data-page="browser"]').hidden = !b.enabled;
+    const login = Boolean(b.enabled && loginGate() && b.login_surface);
+    const host = $('login-browser-host'), panel = $('browser-panel');
+    const container = login ? host : $('page-browser');
+    if (panel.parentElement !== container) container.appendChild(panel);
+    host.hidden = !login;
+    if (login) $('login-screen').hidden = true;
+    setText('browser-status', b.message || '点击登录后连接');
+    const address = $('browser-address');
+    if (document.activeElement !== address) address.value = b.url || s?.site.url || '';
+    const canBrowse = !ui.pending && b.can_navigate && ['ready', 'loading', 'navigation_error'].includes(b.phase);
+    address.disabled = $('browser-go').disabled = !canBrowse;
+    document.querySelectorAll('[data-browser-command]').forEach(button => {
+      const cmd = button.dataset.browserCommand;
+      button.disabled = !canBrowse || (cmd === 'back' && !b.back) || (cmd === 'forward' && !b.forward) || (cmd === 'stop' && b.phase !== 'loading');
+    });
+    setText('browser-mute', b.muted === false ? '静音' : '解除静音');
+    $('browser-pause').hidden = !b.can_pause;
+    $('browser-pause').disabled = ui.pending;
+    $('browser-recover').hidden = b.phase !== 'error' && s?.state.phase !== 'error' && s?.state.login_status !== 'error';
+    $('browser-typing-tools').hidden = login || !(s?.separate_typing || s?.typing.target);
+    const m = b.media || {};
+    const time = seconds => Number.isFinite(seconds) ? `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}` : '—';
+    setText('browser-media', m.state ? `${m.state} · ${time(m.time)} / ${time(m.duration)} · ${m.rate}×` : '未检测到视频');
+    requestBrowserLayout();
+  }
+
+  function syncBrowserLayout() {
+    if (!hasAPI() || !ui.snapshot?.browser?.enabled) return Promise.resolve();
+    const el = $('browser-viewport');
+    const visible = (loginGate() ? !$('login-browser-host').hidden : ui.page === 'browser') && $('settings-overlay').hidden;
+    const r = el.getBoundingClientRect();
+    const x = Math.max(0, r.left), y = Math.max(0, r.top);
+    const w = Math.min(innerWidth, r.right) - x, h = Math.min(innerHeight, r.bottom) - y;
+    const rect = visible && w > 0 && h > 0 ? [x / innerWidth, y / innerHeight, w / innerWidth, h / innerHeight] : null;
+    const next = JSON.stringify(rect);
+    if (browserRect === next) return browserLayoutCall;
+    browserRect = next;
+    browserLayoutCall = browserLayoutCall.then(async () => {
+      const result = await window.pywebview.api.action('browser_layout', { rect });
+      if (!result?.ok && browserRect === next) browserRect = undefined;
+    }).catch(() => { if (browserRect === next) browserRect = undefined; });
+    return browserLayoutCall;
+  }
+
+  function requestBrowserLayout() {
+    if (!browserLayoutFrame) browserLayoutFrame = requestAnimationFrame(() => {
+      browserLayoutFrame = 0;
+      syncBrowserLayout();
+    });
+  }
+
+  function renderLogin() {
+    const gated = loginGate(), s = ui.snapshot;
+    const previouslyGated = document.body.classList.contains('login-page-active');
+    document.body.classList.toggle('login-page-active', gated);
+    $('login-screen').hidden = !gated;
+    document.querySelector('.app-shell').hidden = gated;
+    if (!gated) {
+      if (previouslyGated && ui.page !== 'courses') navigate('courses');
+      return;
+    }
+    closeMenu();
+    if (!s) return;
+    const status = s.state.login_status || 'idle';
+    const label = s.site.label || '雨课堂';
+    setText('login-site-label', label);
+    setText('login-destination-name', label);
+    setText('login-destination-url', s.site.url || '请选择你学校使用的雨课堂站点');
+    setText('login-version', s.version ? '工作台 · v' + s.version.replace(/^v/, '') : '雨课堂学习工作台');
+    setText('login-panel-title', status === 'waiting' ? '在浏览器中完成登录' : status === 'error' ? '重新连接，继续就好' : '连接你的学习账号');
+    const defaults = { idle: '点击后打开 Edge，确认登录后自动进入课程页。', connecting: '正在打开 Edge 并检查已有登录状态…', waiting: '请在 Edge 中完成登录，这里会自动同步。', error: '暂时未能连接，请重新登录或检查站点地址。' };
+    const message = s.state.login_message || defaults[status] || defaults.idle;
+    setText('login-status', s.browser?.enabled ? message.replace(/Edge(?: 窗口)?/g, '内置浏览器') : message);
+    setText('login-browser-step', s.browser?.enabled ? '在内置浏览器中确认账号' : '在 Edge 中确认账号');
+    $('login-status').classList.toggle('is-error', status === 'error');
+    syncLoginControls();
+  }
+
+  function syncLoginControls() {
+    const s = ui.snapshot, status = s ? s.state.login_status || 'idle' : 'connecting';
+    const busy = ui.pending || !s || status === 'connecting' || ['switching', 'closing'].includes(s.state.phase);
+    $('login-button').disabled = !ui.connected || busy;
+    $('login-button').setAttribute('aria-busy', String(busy));
+    setText('login-button-label', ui.pending ? '正在连接…' : status === 'connecting' ? '正在连接…' : status === 'waiting' ? '返回登录窗口' : status === 'error' ? '重新登录' : '登录');
+    $('login-button').classList.toggle('is-connecting', Boolean(busy));
+    $('login-button').querySelector('use').setAttribute('href', '#i-' + (status === 'connecting' || ui.pending ? 'refresh' : status === 'waiting' ? 'globe' : 'user'));
+    const openBrowser = $('settings-overlay').querySelector('[data-action="open_browser"]');
+    openBrowser.hidden = loginGate();
   }
 
   function windowControlsAvailable() { return Boolean(hasAPI() && ui.snapshot && ui.snapshot.window.native_controls); }
@@ -63,16 +169,18 @@
     document.body.classList.toggle('window-is-maximized', maximized);
     document.body.classList.toggle('window-controls-connected', available);
     const desktopGlass = Boolean(available && ui.snapshot.window.desktop_glass);
-    document.documentElement.classList.toggle('desktop-glass', desktopGlass);
+    document.documentElement.classList.toggle('desktop-glass', desktopGlass || typingWindow);
+    if (typingWindow) document.documentElement.classList.toggle('typing-opaque', !desktopGlass);
     $('window-maximize').querySelector('path').setAttribute('d', maximized ? 'M2 4h6v6H2zM4 4V2h6v6H8' : 'M3 1H1v2M9 1h2v2M1 9v2h2M11 9v2H9');
-    const labels = { 'window-close': '关闭工作台', 'window-minimize': '最小化工作台', 'window-maximize': maximized ? '还原窗口' : '最大化工作台' };
+    const windowName = typingWindow ? '打字窗口' : '工作台';
+    const labels = { 'window-close': '关闭' + windowName, 'window-minimize': '最小化' + windowName, 'window-maximize': maximized ? '还原窗口' : '最大化' + windowName };
     for (const [id, label] of Object.entries(labels)) {
       const control = $(id);
       control.disabled = !available || ui.windowPending || Boolean(closing);
       control.setAttribute('aria-label', label);
       control.title = available ? label : '窗口控制仅在桌面程序中可用';
     }
-    setText('window-caption', available ? '桌面工作台' : window.__RAIN_DEMO__ || ui.snapshot && ui.snapshot.demo ? '浏览器演示' : '窗口控件未连接');
+    setText('window-caption', typingWindow ? '输入工具' : available ? '桌面工作台' : window.__RAIN_DEMO__ || ui.snapshot && ui.snapshot.demo ? '浏览器演示' : '窗口控件未连接');
     $('window-drag-region').title = available ? '拖动移动窗口，双击最大化或还原' : '窗口拖动仅在桌面程序中可用';
   }
   async function sendWindowAction(name, payload = {}) {
@@ -206,14 +314,23 @@
   function createTaskNode(task) {
     const node = make('article', 'task-row glass'); node.dataset.id = asText(task.id); node.dataset.testid = 'task-row';
     const symbol = make('span', 'task-symbol');
+    const pick = make('input', 'task-pick'); pick.type = 'checkbox';
+    pick.addEventListener('change', () => {
+      if (locked()) { renderTasks(true); return; }
+      pick.checked ? selectedTasks.add(asText(task.id)) : selectedTasks.delete(asText(task.id));
+      renderTasks(true);
+    });
+    const order = make('span', 'task-order');
+    const selection = make('div', 'task-selection'); selection.append(pick, symbol, order);
     const info = make('div', 'task-info'); info.append(make('h3'), make('p'));
     const type = make('span', 'task-type');
     const status = make('div', 'task-status'); status.append(make('span', 'pill'));
     const retry = make('button', 'task-retry', '重试'); retry.type = 'button'; retry.dataset.action = 'retry_task'; retry.dataset.id = asText(task.id); status.appendChild(retry);
+    const run = make('button', 'task-retry', '单独执行'); run.type = 'button'; run.dataset.action = 'run_task'; run.dataset.id = asText(task.id); status.appendChild(run);
     const progress = make('div', 'task-progress'); progress.appendChild(make('strong'));
     const track = make('div', 'progress-track'), fill = make('div', 'progress-fill'); track.append(fill); progress.appendChild(track);
-    node.append(symbol, info, type, status, progress);
-    node._parts = { symbol, title: info.firstChild, description: info.lastChild, type, status: status.firstChild, retry, progress: progress.firstChild, fill };
+    node.append(selection, info, type, status, progress);
+    node._parts = { symbol, pick, order, run, title: info.firstChild, description: info.lastChild, type, status: status.firstChild, retry, progress: progress.firstChild, fill };
     return node;
   }
 
@@ -227,12 +344,27 @@
   }
   function renderTasks(force = false) {
     const s = ui.snapshot; if (!s || (ui.page !== 'tasks' && !force)) return;
+    const accountScope = fingerprint([s.site.url, s.account, s.courses.filter(c => c.selected).map(c => c.id).sort()]);
+    if (accountScope !== taskAccountScope) { selectedTasks.clear(); taskAccountScope = accountScope; }
+    const visible = s.tasks.filter(t => !taskHidden(t));
+    const eligible = new Set(visible.filter(taskSelectable).map(t => asText(t.id)));
+    if (!locked()) for (const key of selectedTasks) if (!eligible.has(key)) selectedTasks.delete(key);
     const query = ui.taskSearch.toLocaleLowerCase();
-    const tasks = s.tasks.filter((t) => `${asText(t.title)} ${asText(t.course_name)}`.toLocaleLowerCase().includes(query) && matchesTaskType(t) && (!ui.unfinishedOnly || t.status !== 'completed'));
-    const hash = fingerprint([tasks, locked(), ui.taskType, ui.taskSearch, ui.unfinishedOnly, s.empty.tasks]);
+    const tasks = visible.filter(t => (taskAutomatic(t) ? 'automatic' : 'manual') === taskGroup && `${asText(t.title)} ${asText(t.course_name)}`.toLocaleLowerCase().includes(query) && matchesTaskType(t) && (!ui.unfinishedOnly || t.status !== 'completed'));
+    const hash = fingerprint([tasks, locked(), ui.taskType, ui.taskSearch, ui.unfinishedOnly, s.empty.tasks, taskGroup, [...selectedTasks], visible.length]);
     if (!force && fingerprints.tasks === hash) return;
     fingerprints.tasks = hash;
     setText('task-visible-count', tasks.length + ' 项');
+    setText('task-auto-count', visible.filter(taskAutomatic).length);
+    setText('task-manual-count', visible.filter(t => !taskAutomatic(t)).length);
+    setText('task-selection-count', `已勾选 ${selectedTasks.size} 项 · 按勾选顺序执行`);
+    $('task-selection-bar').hidden = taskGroup !== 'automatic';
+    $('run-selected').disabled = locked() || !selectedTasks.size;
+    $('task-select-visible').disabled = locked() || !tasks.some(taskSelectable);
+    $('task-clear-selected').disabled = locked() || !selectedTasks.size;
+    document.querySelectorAll('[data-task-group]').forEach(b => {
+      const active = b.dataset.taskGroup === taskGroup; b.classList.toggle('is-active', active); b.setAttribute('aria-selected', String(active));
+    });
     const container = $('task-list'), validIds = new Set(s.tasks.map((t) => asText(t.id))), displayedIds = new Set(tasks.map((t) => asText(t.id)));
     for (const [key, node] of taskNodes) if (!validIds.has(key)) { node.remove(); taskNodes.delete(key); }
     for (const child of Array.from(container.children)) if (!displayedIds.has(child.dataset.id)) child.remove();
@@ -240,6 +372,12 @@
       const key = asText(task.id); let node = taskNodes.get(key);
       if (!node) { node = createTaskNode(task); taskNodes.set(key, node); }
       const p = node._parts, symbol = task.type === 'video' ? 'video' : task.type === 'slides' ? 'slides' : 'file';
+      const selectable = taskSelectable(task);
+      p.pick.hidden = taskGroup !== 'automatic'; p.pick.disabled = locked() || !selectable;
+      p.pick.checked = selectedTasks.has(key); p.pick.setAttribute('aria-label', '选择任务：' + asText(task.title));
+      p.order.textContent = selectedTasks.has(key) ? String([...selectedTasks].indexOf(key) + 1) : '';
+      p.run.hidden = !selectable; p.run.disabled = locked();
+      node.classList.toggle('is-selected', selectedTasks.has(key));
       if (p.symbol.dataset.symbol !== symbol) { p.symbol.replaceChildren(icon(symbol)); p.symbol.dataset.symbol = symbol; }
       p.symbol.className = 'task-symbol ' + (task.type === 'video' ? 'blue' : task.type === 'slides' ? 'violet' : ['exam', 'homework', 'manual'].includes(task.type) ? 'amber' : 'green');
       p.title.textContent = asText(task.title || '未命名任务');
@@ -326,7 +464,7 @@
     const token = target ? asText(target.token) : '';
     // Confirmation belongs to a single browser/frame/DOM target. A newer
     // target or an interrupted run can never inherit earlier consent.
-    if (token !== ui.typingTarget || ['idle', 'selecting', 'stopped', 'error', 'completed'].includes(phase)) ui.confirmedTarget = '';
+    if (token !== ui.typingTarget || ['idle', 'selecting', 'stopped', 'error'].includes(phase)) ui.confirmedTarget = '';
     ui.typingTarget = token;
     const confirmed = Boolean(token && ui.confirmedTarget === token);
     const labels = { idle: '等待选择目标', selecting: '请在网页中选择', ready: confirmed ? '目标已确认' : '请确认目标', running: '正在输出', paused: '输出已暂停', completed: '输出完成', stopped: '输出已停止', error: '需要重新选择' };
@@ -360,7 +498,7 @@
     if (!ui.typingSpeedDirty && document.activeElement !== $('typing-speed')) { $('typing-speed').value = String(clamp(t.speed, 1, 60)); updateTypingSpeed(); }
     $('typing-step-pick').classList.toggle('is-active', !target);
     $('typing-step-pick').classList.toggle('is-done', Boolean(target));
-    $('typing-step-confirm').classList.toggle('is-active', Boolean(target && !confirmed && phase === 'ready'));
+    $('typing-step-confirm').classList.toggle('is-active', Boolean(target && !confirmed && ['ready', 'completed'].includes(phase)));
     $('typing-step-confirm').classList.toggle('is-done', confirmed || ['running', 'paused'].includes(phase));
     $('typing-step-start').classList.toggle('is-active', confirmed || ['running', 'paused'].includes(phase));
     updateTypingSource();
@@ -375,12 +513,14 @@
     $('typing-pick').disabled = blocked || !canSelect;
     $('typing-pick').lastChild.textContent = target ? '重新选择文本框' : '选择网页文本框';
     $('typing-cancel-pick').hidden = !selecting; $('typing-cancel-pick').disabled = ui.pending;
-    $('typing-confirm').hidden = phase !== 'ready' || !token || confirmed; $('typing-confirm').disabled = blocked;
+    $('typing-confirm').hidden = !['ready', 'completed'].includes(phase) || !token || confirmed; $('typing-confirm').disabled = blocked;
     $('typing-start').hidden = active || selecting;
-    $('typing-start').disabled = blocked || !t.available || phase !== 'ready' || !confirmed || !sourceOK || t.can_start === false;
+    $('typing-start').disabled = blocked || !t.available || !['ready', 'completed'].includes(phase) || !confirmed || !sourceOK || t.can_start === false;
+    $('typing-start').lastChild.textContent = phase === 'completed' ? '输入下一段' : '开始输入';
     $('typing-pause').hidden = phase !== 'running'; $('typing-pause').disabled = ui.pending || t.can_pause === false;
     $('typing-resume').hidden = phase !== 'paused'; $('typing-resume').disabled = ui.pending || !token || t.can_resume === false;
-    $('typing-stop').hidden = !active; $('typing-stop').disabled = ui.pending || t.can_stop === false;
+    $('typing-stop').hidden = !active && !token; $('typing-stop').disabled = ui.pending || t.can_stop === false;
+    $('typing-stop').lastChild.textContent = active ? '停止输入' : '解除锁定';
     $('typing-source').readOnly = active;
     $('typing-clear-source').disabled = active || !sourceLength();
     $('typing-speed').disabled = !t.available || selecting || ui.pending;
@@ -391,24 +531,33 @@
   async function handleTypingAction(action) {
     const t = ui.snapshot ? ui.snapshot.typing : {}, target = t.target || {}, token = asText(target.token);
     if (action === 'typing_clear_source') { if (!['running', 'paused'].includes(t.phase)) { $('typing-source').value = ''; updateTypingSource(); } return; }
-    if (action === 'typing_confirm') { if (t.phase === 'ready' && token && !learningBusy()) { ui.confirmedTarget = token; renderTools(); } return; }
-    if (action === 'typing_pause_learning') { await sendAction('primary'); return; }
-    if (action === 'typing_pick') { ui.confirmedTarget = ''; await sendAction('typing_select'); return; }
+    if (action === 'typing_confirm') { if (['ready', 'completed'].includes(t.phase) && token && !learningBusy()) { ui.confirmedTarget = token; renderTools(); } return; }
+    if (action === 'typing_pause_learning') { await sendAction(typingWindow ? 'pause' : 'primary'); return; }
+    if (action === 'typing_pick') { ui.confirmedTarget = ''; await showTypingBrowser(); await sendAction('typing_select'); return; }
     if (action === 'typing_cancel_pick') { ui.confirmedTarget = ''; await sendAction('typing_cancel'); return; }
     if (action === 'typing_start') {
-      if (t.phase !== 'ready' || !token || ui.confirmedTarget !== token || learningBusy()) { showToast('请先选择并确认指定文本框。', true); return; }
+      if (!['ready', 'completed'].includes(t.phase) || !token || ui.confirmedTarget !== token || learningBusy()) { showToast('请先选择并确认指定文本框。', true); return; }
       const text = $('typing-source').value;
       if (!text || sourceLength() > 50000) { showToast('请输入 1–50,000 字符的文字。', true); return; }
       if (!typingTargetMultiline(target) && /[\r\n]/.test(text)) { showToast('单行文本框不支持换行，请修改原文。', true); return; }
       ui.typingSpeedDirty = false;
+      await showTypingBrowser();
       await sendAction('typing_start', { token, text, speed: number($('typing-speed').value, 20), confirmed: true }); return;
     }
-    if (action === 'typing_resume') { if (t.phase === 'paused' && token) await sendAction('typing_resume', { token }); return; }
+    if (action === 'typing_resume') { if (t.phase === 'paused' && token) { await showTypingBrowser(); await sendAction('typing_resume', { token }); } return; }
     if (action === 'typing_stop') { ui.confirmedTarget = ''; await sendAction('typing_stop'); return; }
     if (action === 'typing_pause') await sendAction('typing_pause');
   }
 
+  async function showTypingBrowser() {
+    if (ui.snapshot?.browser?.enabled) {
+      navigate('browser', true);
+      await syncBrowserLayout();
+    }
+  }
+
   function syncDisabled() {
+    if (typingWindow) { syncTypingControls(); return; }
     const s = ui.snapshot, busy = locked();
     $('primary-button').disabled = ui.pending || !s || !s.state.primary || !s.state.primary.enabled;
     $('primary-button').setAttribute('aria-busy', String(ui.pending));
@@ -425,12 +574,47 @@
     $('site-submit').disabled = busy || !ui.connected;
     $('site-url').disabled = busy;
     document.querySelectorAll('.site-history button').forEach((button) => { button.disabled = busy; });
-    if (!$('settings-overlay').hidden && busy) setText('site-error', '请先暂停任务，等待当前操作停止后切换站点。');
+    const siteBusyMessage = '请先暂停任务，等待当前操作停止后切换站点。';
+    if (!$('settings-overlay').hidden && s && (s.state.selection_locked ?? s.state.busy)) setText('site-error', siteBusyMessage);
+    else if ($('site-error').textContent === siteBusyMessage) setText('site-error', '');
     if (typingActive()) $('primary-button').disabled = true;
-    syncTypingControls();
+    if (!s?.separate_typing) syncTypingControls();
+    syncLoginControls();
+    renderUpdate();
   }
 
-  function navigate(page) {
+  function renderUpdate() {
+    const s = ui.snapshot, update = s && s.update || {}, phase = update.phase || 'idle';
+    const working = ['checking', 'downloading', 'installing'].includes(phase);
+    setText('update-current', s && s.version ? '当前 v' + s.version : '正在读取版本');
+    setText('update-latest', update.latest ? '正式版 v' + update.latest : 'GitHub 正式版');
+    setText('update-status', update.message || '点击检查更新，查看最新正式版');
+    setText('update-notes', update.notes || '');
+    $('update-details').hidden = !update.notes;
+    $('update-check').disabled = ui.pending || !ui.connected || working;
+    setText('update-check', phase === 'checking' ? '正在检查…' : '检查更新');
+    $('update-download').hidden = !update.can_download;
+    $('update-download').disabled = ui.pending || working;
+    $('update-cancel').hidden = !['checking', 'downloading'].includes(phase);
+    $('update-cancel').disabled = ui.pending;
+    $('update-install').hidden = phase !== 'ready';
+    $('update-install').disabled = ui.pending || !update.install_supported || !update.can_install;
+    $('update-release').disabled = ui.pending || !ui.connected || phase === 'installing';
+    $('update-progress-area').hidden = phase !== 'downloading';
+    const total = Number(update.total) || 0, downloaded = Number(update.downloaded) || 0;
+    $('update-progress').value = total ? Math.min(100, downloaded * 100 / total) : 0;
+    const size = (bytes) => (bytes / 1048576).toFixed(1) + ' MB';
+    setText('update-progress-label', size(downloaded) + ' / ' + size(total));
+    const hint = phase === 'ready' && !update.install_supported
+      ? '源码 / 演示模式不执行覆盖安装；请在 Windows 安装版中使用。'
+      : phase === 'ready' && !update.can_install
+        ? '请先暂停学习并结束手动打字，等待当前操作停止后安装。'
+        : '安装前保存进度并退出工作台，覆盖当前目录；保留登录状态、配置与任务记录。';
+    setText('update-hint', hint);
+  }
+
+  function navigate(page, immediate = false) {
+    if (loginGate()) return;
     if (!pageNames[page] || page === ui.page) return;
     const oldPage = $('page-' + ui.page), nextPage = $('page-' + page), token = ++ui.navigationToken;
     ui.page = page;
@@ -439,18 +623,23 @@
     if (page === 'courses') renderCourses();
     else if (page === 'tasks') renderTasks();
     else if (page === 'activity') renderActivity();
-    else renderTools();
+    else if (!ui.snapshot?.separate_typing && page === 'tools') renderTools();
     document.body.classList.toggle('tools-page-active', page === 'tools');
+    document.body.classList.toggle('browser-page-active', page === 'browser');
     syncDisabled();
     document.querySelectorAll('[data-page]').forEach((button) => { const active = button.dataset.page === page; button.classList.toggle('is-active', active); if (active) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current'); });
     setText('page-breadcrumb', pageNames[page]);
     closeMenu();
     oldPage.classList.add('is-leaving');
-    window.setTimeout(() => {
+    const showPage = () => {
       if (token !== ui.navigationToken) return;
       document.querySelectorAll('.page-panel').forEach((panel) => { panel.hidden = panel !== nextPage; panel.classList.remove('is-leaving', 'is-active'); });
       nextPage.classList.add('is-active');
-    }, reduceMotion.matches ? 0 : 140);
+      if (page === 'browser') document.querySelector('.main-content').scrollTop = 0;
+      requestBrowserLayout();
+    };
+    if (immediate || page === 'browser' || oldPage.id === 'page-browser') showPage();
+    else window.setTimeout(showPage, reduceMotion.matches ? 0 : 140);
   }
 
   function showToast(message, error = false) {
@@ -482,7 +671,8 @@
   async function sendAction(name, payload = {}) {
     if (ui.pending) return;
     if (!ui.connected) { showToast('正在连接桌面工作台，请稍候。', true); return; }
-    ui.pending = true; syncDisabled(); renderCourses(); renderTasks();
+    ui.pending = true; syncDisabled();
+    if (!typingWindow) { renderCourses(); renderTasks(); }
     const startTime = performance.now();
     try {
       const result = hasAPI() ? await window.pywebview.api.action(name, payload) : window.__RAIN_DEMO__ ? await demoAction(name, payload) : { ok: false, message: '桌面连接暂不可用，请重新打开程序。' };
@@ -498,11 +688,28 @@
       // state in the next snapshot determines whether pause is immediately usable.
       const remaining = Math.max(0, 280 - (performance.now() - startTime));
       if (remaining) await new Promise((resolve) => setTimeout(resolve, remaining));
-      ui.pending = false; syncDisabled(); renderCourses(); renderTasks();
+      ui.pending = false; syncDisabled();
+      if (!typingWindow) { renderCourses(); renderTasks(); }
     }
   }
 
   async function handleAction(action, target) {
+    if (action === 'browser_typing_tools') {
+      if (ui.snapshot?.separate_typing) await sendAction('open_typing_window');
+      else navigate('tools');
+      return;
+    }
+    if (['run_selected', 'run_task', 'task_select_visible', 'task_clear_selected'].includes(action)) {
+      if (locked() || !ui.snapshot) return;
+      if (action === 'task_clear_selected') { selectedTasks.clear(); renderTasks(true); return; }
+      if (action === 'task_select_visible') {
+        const query = ui.taskSearch.toLocaleLowerCase();
+        ui.snapshot.tasks.filter(t => !taskHidden(t) && taskSelectable(t) && matchesTaskType(t) &&
+          `${asText(t.title)} ${asText(t.course_name)}`.toLocaleLowerCase().includes(query)).forEach(t => selectedTasks.add(asText(t.id)));
+        renderTasks(true); return;
+      }
+      await sendAction('start_tasks', { ids: action === 'run_task' ? [target.dataset.id] : [...selectedTasks] }); return;
+    }
     if (action.startsWith('window_')) { await sendWindowAction(action); return; }
     if (action.startsWith('typing_')) { await handleTypingAction(action); return; }
     if (action === 'settings') { openSettings(); return; }
@@ -515,6 +722,8 @@
   }
 
   document.addEventListener('click', (event) => {
+    const tab = event.target.closest('[data-task-group]');
+    if (tab) { taskGroup = tab.dataset.taskGroup; ui.taskType = 'all'; $('task-type').value = 'all'; renderTasks(true); return; }
     const speedPreset = event.target.closest('[data-typing-speed]');
     if (speedPreset && !speedPreset.disabled) { $('typing-speed').value = speedPreset.dataset.typingSpeed; ui.typingSpeedDirty = true; updateTypingSpeed(); if (ui.snapshot && ['running', 'paused'].includes(ui.snapshot.typing.phase)) sendAction('typing_speed', { speed: number($('typing-speed').value, 20) }); return; }
     const course = event.target.closest('.course-card');
@@ -530,6 +739,17 @@
     if (!event.target.closest('.hero-actions')) closeMenu();
   });
   $('primary-button').addEventListener('click', () => sendAction('primary'));
+  $('browser-address-form').addEventListener('submit', event => {
+    event.preventDefault();
+    if (!$('browser-go').disabled) sendAction('browser_command', { command: 'go', url: $('browser-address').value.trim() });
+  });
+  document.querySelectorAll('[data-browser-command]').forEach(button => button.addEventListener('click', () => {
+    if (!button.disabled) sendAction('browser_command', { command: button.dataset.browserCommand });
+  }));
+  new ResizeObserver(requestBrowserLayout).observe($('browser-viewport'));
+  new MutationObserver(requestBrowserLayout).observe($('settings-overlay'), { attributes: true, attributeFilter: ['hidden'] });
+  window.addEventListener('resize', requestBrowserLayout);
+  document.addEventListener('scroll', requestBrowserLayout, true);
   $('window-titlebar').addEventListener('dblclick', (event) => {
     if (event.target.closest('button,input,textarea,select,a,[contenteditable]')) return;
     if (event.target.closest('.pywebview-drag-region')) { event.preventDefault(); sendWindowAction('window_toggle_maximize'); }
@@ -555,16 +775,16 @@
       // draft, and only active typing operations receive the stop shortcut.
       if (!$('settings-overlay').hidden) { event.preventDefault(); closeSettings(); return; }
       if (!$('more-menu').hidden) { event.preventDefault(); closeMenu(); return; }
-      if (ui.page === 'tools' && ui.snapshot) {
+      if ((typingWindow || ui.page === 'tools') && ui.snapshot) {
         const phase = ui.snapshot.typing.phase;
         if (phase === 'selecting') { event.preventDefault(); handleTypingAction('typing_cancel_pick'); return; }
         if (['running', 'paused'].includes(phase)) { event.preventDefault(); handleTypingAction('typing_stop'); return; }
       }
     }
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); if (ui.page === 'courses') $('course-search').focus(); else if (ui.page === 'tasks') $('task-search').focus(); }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && !loginGate()) { event.preventDefault(); if (ui.page === 'courses') $('course-search').focus(); else if (ui.page === 'tasks') $('task-search').focus(); }
     // Keep modal keyboard navigation inside its dialog; restore focus on close.
     if (event.key === 'Tab' && !$('settings-overlay').hidden) {
-      const items = Array.from($('settings-overlay').querySelectorAll('button:not(:disabled), input:not(:disabled), [tabindex="0"]')).filter((node) => node.getClientRects().length);
+      const items = Array.from($('settings-overlay').querySelectorAll('button:not(:disabled), input:not(:disabled), summary, [tabindex="0"]')).filter((node) => node.getClientRects().length);
       if (!items.length) return;
       if (event.shiftKey && document.activeElement === items[0]) { event.preventDefault(); items[items.length - 1].focus(); }
       else if (!event.shiftKey && document.activeElement === items[items.length - 1]) { event.preventDefault(); items[0].focus(); }
@@ -581,7 +801,7 @@
       try {
         if (hasAPI()) applySnapshot(await window.pywebview.api.snapshot());
         else if (window.__RAIN_DEMO__) applySnapshot(typeof window.__RAIN_DEMO__ === 'object' ? window.__RAIN_DEMO__ : demoSnapshot());
-        else if (!ui.connected) { setText('hero-title', '正在连接桌面工作台。'); setText('hero-description', '连接完成后，可选择课程并开始处理任务。'); }
+        else if (!ui.connected && !typingWindow) { setText('hero-title', '正在连接桌面工作台。'); setText('hero-description', '连接完成后，可选择课程并开始处理任务。'); }
       } catch (error) {
         errorsInRow += 1;
         if (errorsInRow >= 3) { setText('connection-title', '桌面连接暂时中断'); setText('connection-sub', '正在重新连接，已保存的进度保留'); setText('footer-status', '正在重新连接工作台…'); $('connection-dot').classList.remove('is-ready', 'is-working'); }
@@ -612,7 +832,7 @@
       { id: 'demo-t4', course_name: '艺术鉴赏与生活美学', title: '如何欣赏一幅画', type: 'video', type_label: '视频观看', status: 'completed', status_label: '服务器已确认', progress: 1 },
       { id: 'demo-t5', course_name: '大学英语（三）', title: 'Unit 3 · 课堂作业', type: 'manual', type_label: '作业提交', status: 'manual', status_label: '人工处理', progress: null },
     ];
-    return { demo: true, version: '0.8.4', site: { label: '长江雨课堂', url: 'https://changjiang.yuketang.cn/web', history: [{ label: '雨课堂', url: 'https://www.yuketang.cn/v2/web' }, { label: '长江雨课堂', url: 'https://changjiang.yuketang.cn/web' }] }, account: { name: '演示同学', logged_in: true }, state: { phase: 'idle', busy: false, selection_locked: false, message: '课程选择已保存。直接点击开始，自动扫描并安排学习任务。', primary: { label: '开始学习', action: 'start', enabled: true } }, counts: { courses: courses.length, selected: 3, tasks: tasks.length, completed: 1, pending: 3, errors: 0 }, courses, tasks, logs: [{ time: '10-13 15:24:12', level: '服务器已确认', course: '艺术鉴赏与生活美学', task: '如何欣赏一幅画', message: '任务完成状态已同步。' }, { time: '10-13 15:23:48', level: '扫描完成', message: '所选课程任务已加入队列。' }], scan_errors: [], progress: { current: 1, total: 5, percent: 20, label: '学习进度' }, filters: { task_type: 'all', unfinished_only: true } };
+    return { demo: true, version: '0.8.7', site: { label: '长江雨课堂', url: 'https://changjiang.yuketang.cn/web', history: [{ label: '雨课堂', url: 'https://www.yuketang.cn/v2/web' }, { label: '长江雨课堂', url: 'https://changjiang.yuketang.cn/web' }] }, account: { name: '演示同学', logged_in: true }, state: { phase: 'idle', busy: false, selection_locked: false, message: '课程选择已保存。直接点击开始，自动扫描并安排学习任务。', primary: { label: '开始学习', action: 'start', enabled: true } }, counts: { courses: courses.length, selected: 3, tasks: tasks.length, completed: 1, pending: 3, errors: 0 }, courses, tasks, logs: [{ time: '10-13 15:24:12', level: '服务器已确认', course: '艺术鉴赏与生活美学', task: '如何欣赏一幅画', message: '任务完成状态已同步。' }, { time: '10-13 15:23:48', level: '扫描完成', message: '所选课程任务已加入队列。' }], scan_errors: [], progress: { current: 1, total: 5, percent: 20, label: '学习进度' }, filters: { task_type: 'all', unfinished_only: true } };
   }
   async function demoAction(name, payload) {
     if (name.startsWith('typing_')) return { ok: false, message: '演示工具不会向网页输出。请在正式程序中选择真实目标。' };
@@ -633,6 +853,18 @@
   // It exposes the already-public display snapshot, never the business Store.
   window.RainUI = Object.freeze({ applySnapshot, getState: () => ({ page: ui.page, courseFilter: ui.courseFilter, taskType: ui.taskType, unfinishedOnly: ui.unfinishedOnly, pending: ui.pending, snapshot: ui.snapshot }), navigate, demoSnapshot });
   $('primary-button').dataset.testid = 'primary-action';
+  if (typingWindow) {
+    ui.page = 'tools';
+    document.querySelector('.app-shell').hidden = false;
+    $('page-courses').hidden = true;
+    $('page-tools').hidden = false;
+    $('page-tools').classList.add('is-active');
+    $('login-screen').hidden = true;
+    const dock = make('footer', 'typing-window-dock');
+    dock.append(document.querySelector('.typing-bottom-note'), document.querySelector('.typing-run-actions'));
+    document.querySelector('.app-shell').appendChild(dock);
+    syncTypingControls();
+  }
   renderWindowFrame();
   poll();
 })();

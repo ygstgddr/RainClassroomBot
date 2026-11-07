@@ -39,9 +39,12 @@ class VideoHandler:
                 raise RetryableError('未加载出可见 video 元素，需要重新加载页面')
             return {'phase': '等待播放器', 'ready': False}
         video = media[0]
-        state = await video.evaluate('''v => ({time:v.currentTime, duration:Number.isFinite(v.duration)?v.duration:null,
+        # 在读取/播放之前设置播放器静音，确保暂停恢复及页面重建后仍静音。
+        # Edge 进程的 --mute-audio 同时覆盖网站绕过此 video 的其他音频输出。
+        state = await video.evaluate('''v => { v.muted = true; v.defaultMuted = true;
+            return {time:v.currentTime, duration:Number.isFinite(v.duration)?v.duration:null,
             paused:v.paused, ended:v.ended, readyState:v.readyState,
-            networkState:v.networkState, error:v.error ? v.error.code : null})''')
+            muted:v.muted, networkState:v.networkState, error:v.error ? v.error.code : null}; }''')
         if state['error']:
             raise RetryableError(f"视频加载失败，媒体错误码 {state['error']}")
         if state['time'] > self.last_time + .1:
@@ -50,7 +53,7 @@ class VideoHandler:
         self.ended = bool(state['ended'])
         if state['paused'] and not self.ended:
             # 正常播放；倍速只通过网站菜单设置，不改 currentTime 或学习上报。
-            result = await video.evaluate("async v => { try { await v.play(); return true; } catch(e) { return false; } }")
+            result = await video.evaluate("async v => { v.muted = true; try { await v.play(); return true; } catch(e) { return false; } }")
             if not result:
                 await video.click()
         if not self.ended and time.monotonic() - self.last_movement > self.config['video_stall_seconds']:

@@ -41,7 +41,7 @@ def work_area_metrics(monitor, work):
 
 class WindowFrame:
     """A tiny controller; expensive native work never runs during snapshots."""
-    def __init__(self, window):
+    def __init__(self, window, *, attach_shown=True):
         self.window = window
         self._ready = False
         self._closed = False
@@ -55,7 +55,8 @@ class WindowFrame:
         self._backdrop = None
         events = getattr(window, 'events', None)
         if events:
-            events.shown += self.on_shown
+            if attach_shown:
+                events.shown += self.on_shown
             events.maximized += self.on_maximized
             events.restored += self.on_restored
             events.closed += self.on_closed

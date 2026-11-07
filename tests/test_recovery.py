@@ -64,6 +64,10 @@ def test_watchdog_heartbeat_timeout_then_restart_budget(tmp_path):
     dog.start()
     try:
         wait_until(lambda: store.get('desired') == 'paused', timeout=15)
+        # Pausing is written before the status and cleanup finish. Join the
+        # naturally terminating watchdog before inspecting its final report.
+        dog.join(10)
+        assert not dog.is_alive()
         assert '频繁崩溃' in store.get('worker_status')
         assert store.get('scan_progress')['status'] == 'failed'
     finally:

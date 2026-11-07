@@ -18,6 +18,18 @@ async def run_queue(adapter, browser, store, config, logger):
         return
     await adapter.courses()  # 重新建立每门课程的请求上下文。
     tasks = store.scoped_rows(account['id'])
+    scope = store.get('task_scope')
+    if scope is not None:
+        by_id = {t['key']: t for t in tasks}
+        ids = scope.get('ids') if isinstance(scope, dict) else None
+        if (not isinstance(ids, list) or not ids or not all(isinstance(key, str) for key in ids)
+                or scope.get('account') != account['id'] or scope.get('courses') != store.selected_courses(account['id'])
+                or len(ids) != len(set(ids)) or any(key not in by_id or by_id[key]['kind'] not in AUTOMATED_KINDS
+                    or by_id[key]['state'] not in ('pending', 'running', 'completed') for key in ids)):
+            store.set('desired', 'paused')
+            record(store, logger, '队列暂停', '所选任务范围已变化或有任务不可执行，请重新勾选；不会执行其他任务')
+            return
+        tasks = [by_id[key] for key in ids]
     blocked_key = store.get('blocked_task')
     blocked = next((t for t in tasks if t['key'] == blocked_key), None)
     if blocked and blocked['state'] not in ('completed', 'pending'):
@@ -90,7 +102,8 @@ async def run_queue(adapter, browser, store, config, logger):
     summary = None
     if store.get('desired') == 'run':
         store.set('desired', 'idle')
-        remaining = [t for t in store.scoped_rows() if t['state'] != 'completed']
+        chosen_keys = {t['key'] for t in tasks}
+        remaining = [t for t in store.scoped_rows() if t['state'] != 'completed' and (scope is None or t['key'] in chosen_keys)]
         counts = Counter(t['state'] for t in remaining)
         labels = {'locked': '锁定', 'needs_adapter': '需要适配', 'manual': '需手动完成',
                   'failed': '失败', 'pending': '待执行', 'running': '执行中'}

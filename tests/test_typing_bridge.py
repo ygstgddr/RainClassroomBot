@@ -38,6 +38,16 @@ def start_payload(**overrides):
     return {'token': TOKEN, 'text': 'PRIVATE_TYPED_TEXT\n下一行', 'speed': 20, 'confirmed': True, **overrides}
 
 
+def test_completed_target_is_reusable_and_pending_command_keeps_confirmation_identity(tmp_path):
+    store, dog, ui = desktop(tmp_path, phase='completed')
+    assert ui.snapshot()['typing']['can_start']
+    assert ui.action('typing_start', start_payload())['ok']
+    pending = ui.snapshot()['typing']
+    assert pending['phase'] == 'completed' and pending['target']['token'] == TOKEN
+    assert pending['pending'] and not pending['can_start']
+    assert not ui.action('typing_start', start_payload())['ok']
+
+
 def test_snapshot_exposes_target_summary_but_no_source_existing_or_url_tokens(tmp_path):
     store, dog, ui = desktop(tmp_path)
     state = ui.snapshot()
@@ -128,7 +138,8 @@ def test_demo_typing_is_simulated_and_never_sends_to_real_browser(tmp_path):
     token = ui.snapshot()['typing']['target']['token']
     assert ui.action('typing_start', start_payload(token=token))['ok']
     state = ui.snapshot()['typing']
-    assert state['phase'] == 'completed' and state['target'] is None
+    assert state['phase'] == 'completed' and state['target']['token'] == token
+    assert state['can_start']  # 演示模式也保留连续输入绑定，与实际模式一致。
     assert state['sent'] == len(start_payload()['text'])
     assert dog.commands == []
     assert 'PRIVATE_TYPED_TEXT' not in json.dumps(store.get('typing_status'))

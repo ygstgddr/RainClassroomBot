@@ -71,6 +71,25 @@ def test_real_native_chinese_ascii_newline_append_without_paste_submit_or_text_p
     run_edge(scenario)
 
 
+def test_completed_binding_can_append_again_but_never_rebinds_replaced_element():
+    async def scenario(page, session):
+        await page.set_content('<textarea id="answer"></textarea><textarea id="other"></textarea>')
+        token = await pick(session, page)
+        for text in ('第一段', '\n第二段'):
+            await session.start(token, text, speed=60, confirmed=True)
+            await wait_phase(session, 'completed')
+            assert session.snapshot()['target']['token'] == token
+        assert await page.locator('#answer').input_value() == '第一段\n第二段'
+        assert session.snapshot()['target']['characters'] == 7
+        await page.locator('#answer').evaluate('el=>{const next=document.createElement("textarea");next.id=el.id;el.replaceWith(next)}')
+        with pytest.raises(ManualTypingError):
+            await session.start(token, '不能写到新框', speed=60, confirmed=True)
+        assert session.snapshot()['target'] is None
+        assert await page.locator('#answer').input_value() == ''
+        assert await page.locator('#other').input_value() == ''
+    run_edge(scenario)
+
+
 @pytest.mark.parametrize('kind', ['textarea', 'contenteditable'])
 def test_iframe_target_only_and_multiline(kind):
     async def scenario(page, session):

@@ -40,7 +40,9 @@ class Workflow:
             self.store.set('login_resume', None)
 
     def account_changed(self, account, action):
+        self.store.set('task_scope', None)
         self.store.set('account', account)
+        self._confirm_session()
         self.store.set('scanned_account', None)
         self.store.set('run_mode', 'start')
         self.store.set('blocked_task', None)
@@ -64,6 +66,7 @@ class Workflow:
             return
         self.expected_account = account['id']
         self.store.set('account', account)
+        self._confirm_session()
 
         if action == 'catalog':
             self.show('catalog', '正在载入课程和开课时间…', action)
@@ -123,6 +126,7 @@ class Workflow:
         """保存明确的原操作；不会覆盖已经生效的暂停或关闭。"""
         if not self.transition(action, 'login'):
             return False
+        self.store.set('authenticated_session', None)
         self.store.set('login_resume', {'action': action, 'account': self.expected_account})
         self.store.set('login_message', message)
         self.show('waiting_login', '请在 Edge 完成登录；助手会自动识别并继续', action)
@@ -152,6 +156,7 @@ class Workflow:
             self.account_changed(account, 'login')
             return True
         self.store.set('account', account)
+        self._confirm_session()
         self.expected_account = account['id']
         action = intent.get('action') if intent.get('action') in ('catalog', 'scan', 'run') else 'catalog'
         if self.transition('login', action):
@@ -160,3 +165,9 @@ class Workflow:
             record(self.store, self.logger, '登录恢复', '已自动恢复原操作')
             return True
         return False
+
+    def _confirm_session(self):
+        """A fresh account response, never cached identity, unlocks the login UI."""
+        token = self.config.get('login_session')
+        if token:
+            self.store.set('authenticated_session', token)

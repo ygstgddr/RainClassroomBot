@@ -95,7 +95,7 @@ def test_web_selection_primary_pause_and_search(tmp_path):
                 await page.locator('#task-search').fill('不存在的任务名称')
                 await page.wait_for_function("document.querySelectorAll('[data-testid=task-row]').length===0")
                 await page.locator('#task-search').fill('')
-                await page.wait_for_function("document.querySelectorAll('[data-testid=task-row]').length===2")
+                await page.wait_for_function("document.querySelectorAll('[data-testid=task-row]').length===1")
             finally:
                 await browser.close()
     asyncio.run(scenario())

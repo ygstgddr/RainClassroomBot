@@ -10,13 +10,21 @@ class EdgeManager:
     def __init__(self, config):
         self.config = config
         self.playwright = self.context = self.page = None
+        self.embedded = bool(config.get('embedded_endpoint'))
+        self.cdp_browser = None
 
     async def start(self, headed=False):
+        if self.embedded:
+            await self._attach_embedded()
+            return
         Path(self.config['profile_dir']).mkdir(parents=True, exist_ok=True)
         self.playwright = await async_playwright().start()
         self.context = await self.playwright.chromium.launch_persistent_context(
             self.config['profile_dir'], channel='msedge',
             headless=False if headed else self.config['headless'],
+            # 仅静音本助手专用 Edge 进程；新标签、iframe 和恢复播放均适用。
+            # 不修改 Windows 音量，也不影响用户自行打开的 Edge。
+            args=['--mute-audio'],
             viewport={'width': 1280, 'height': 840},
             timeout=self.config['navigation_timeout_seconds'] * 1000)
         self.context.set_default_timeout(8000)
@@ -26,6 +34,26 @@ class EdgeManager:
         for extra in self.context.pages[1:]:
             await extra.close()
         await self.page.goto(self.config['base_url'] + self.config['entry_path'], wait_until='domcontentloaded')
+
+    async def _attach_embedded(self):
+        self.playwright = await async_playwright().start()
+        endpoint = self.config['embedded_endpoint']
+        for attempt in range(12):
+            try:
+                self.cdp_browser = await self.playwright.chromium.connect_over_cdp(endpoint, timeout=1800)
+                break
+            except Exception:
+                if attempt == 11:
+                    raise
+                await asyncio.sleep(.4)
+        contexts = self.cdp_browser.contexts
+        if len(contexts) != 1 or len(contexts[0].pages) != 1:
+            raise RuntimeError('内置浏览器必须包含唯一的工作页面')
+        self.context, self.page = contexts[0], contexts[0].pages[0]
+        self.context.set_default_timeout(8000)
+        self.context.set_default_navigation_timeout(self.config['navigation_timeout_seconds'] * 1000)
+        if self.page.url in ('', 'about:blank'):
+            await self.page.goto(self.config['base_url'] + self.config['entry_path'], wait_until='domcontentloaded')
 
     async def pause_media(self):
         if not self.context:
@@ -37,14 +65,39 @@ class EdgeManager:
                 except Exception:
                     pass
 
+    async def media_snapshot(self):
+        """Bounded read-only probe, including video players inside page frames."""
+        async def sample(frame):
+            try:
+                return await asyncio.wait_for(frame.evaluate('''() => {
+                    const videos = [...document.querySelectorAll('video')];
+                    const visible = videos.filter(v => v.getBoundingClientRect().width > 0 &&
+                        v.getBoundingClientRect().height > 0 && getComputedStyle(v).visibility === 'visible');
+                    const v = visible.find(x => !x.paused && !x.ended) || visible[0];
+                    if (!v) return null;
+                    return {state: v.error ? '播放错误' : v.ended ? '播放结束' : v.paused ? '已暂停' :
+                        v.readyState < 3 ? '缓冲中' : '播放中', time: Math.round(v.currentTime * 10) / 10,
+                        duration: Number.isFinite(v.duration) ? v.duration : null, rate: v.playbackRate};
+                }'''), 2)
+            except Exception:
+                return None
+
+        frames = self.page.frames[:24]
+        results = [item for item in await asyncio.gather(*(sample(frame) for frame in frames)) if item]
+        return next((item for item in results if item['state'] in ('播放中', '缓冲中')), results[0] if results else {})
+
     async def close(self):
         try:
-            if self.context:
+            if self.embedded:
+                if self.cdp_browser and self.cdp_browser.is_connected():
+                    await asyncio.wait_for(self.cdp_browser.close(), 5)
+            elif self.context:
                 await asyncio.wait_for(self.context.close(), 12)
         finally:
             if self.playwright:
                 await asyncio.wait_for(self.playwright.stop(), 8)
             self.context = self.page = self.playwright = None
+            self.cdp_browser = None
 
     async def task_entry(self, task):
         """优先使用网站叶子节点 ID，避免章节/图文/视频的同名歧义。
@@ -122,6 +175,8 @@ class EdgeManager:
                 for _ in range(6):
                     pages = [p for p in self.context.pages if p not in before]
                     if pages:
+                        if self.embedded:
+                            raise AdaptationRequired('任务打开了独立弹窗，当前内置浏览器无法确认任务页面')
                         old = self.page
                         self.page = pages[-1]
                         await self.page.wait_for_load_state('domcontentloaded')

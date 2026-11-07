@@ -2,6 +2,7 @@
 __pycache__/
 .pytest_cache/
 edge_profile/
+webview2_profile/
 data/
 logs/
 build/

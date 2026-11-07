@@ -337,6 +337,9 @@ class ManualTyping:
                 raise ManualTypingError('请先确认目标文本框，再开始输入')
             if self._state['phase'] not in ('ready', 'completed'):
                 raise ManualTypingError('当前操作尚未结束，请先暂停或停止')
+            # Completion is published before the previous runner disarms its
+            # event guards. Finish that cleanup before arming another paragraph.
+            await self._wait_runner()
             if not isinstance(text, str) or not text:
                 raise ManualTypingError('请输入需要输出的文字')
             if len(text) > 50000:
@@ -422,7 +425,10 @@ class ManualTyping:
                     self._wake.clear()
             if self._state['phase'] == 'running':
                 self._text = ''
-                self._show('completed', '输入完成；请自行核对并提交')
+                # Keep this exact ElementHandle/token for another explicit
+                # start. _begin validates it again; no selector rebinding.
+                self._state['target'].update(await self._target.evaluate(_DESCRIBE))
+                self._show('completed', '本段输入完成，仍锁定当前文本框；可修改原文后继续输入下一段')
         except asyncio.CancelledError:
             raise
         except Exception:

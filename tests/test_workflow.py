@@ -13,6 +13,7 @@ from tests.test_core import sample
 
 class Browser:
     def __init__(self):
+        self.embedded = False
         self.page = self
         self.frames = ()
         self.pauses = 0

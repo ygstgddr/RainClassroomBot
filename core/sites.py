@@ -89,15 +89,24 @@ def site_config(base_config, value):
     return result
 
 
-def prepare_site(config):
+def prepare_site(config, connect=True):
     store = Store(config['root'])
     store.recover()
     store.set('current', {})
     store.set('scanned_account', None)
-    store.set('desired', 'catalog')
+    store.set('desired', 'catalog' if connect else 'idle')
     store.set('worker_busy', False)
     store.set('force_headed', False)
     store.set('worker_status', '正在打开网站，读取课程列表')
     store.set('scan_progress', dict(status='queued', mode='catalog', phase='正在启动 Edge，读取课程列表',
                                     total=0, completed=0, started=time.time()))
+    store.set('authenticated_session', None)
+    # A new connection must not inherit the previous worker's error display.
+    store.set('workflow', {})
+    if not connect:
+        store.set('task_scope', None)
+        store.set('login_resume', None)
+        store.set('typing_status', {})
+        store.set('worker_status', '点击登录后打开 Edge，已有登录状态会自动复用')
+        store.set('scan_progress', {})
     return store

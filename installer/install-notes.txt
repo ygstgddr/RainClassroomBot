@@ -1,0 +1,21 @@
+雨课堂学习工作台 · 安装说明
+
+本安装包包含 Python 和程序依赖，无需另行安装 Python。
+运行前需要 Microsoft Edge 浏览器和 Microsoft Edge WebView2 Runtime。
+如缺少 WebView2，可从微软官网下载：
+https://developer.microsoft.com/microsoft-edge/webview2/consumer/
+
+首次安装
+默认安装到当前用户的 AppData\Local\Programs\RainClassroomBot，无需管理员权限。
+也可以选择其他有写入权限的目录。安装时可选创建桌面快捷方式。
+
+从旧便携版升级
+请先正常退出助手及其管理的 Edge。选择原来 RainClassroomBot.exe 所在的目录，直接覆盖升级。
+安装器不会覆盖已有 config/config.yaml，也不会删除 data、sites、edge_profile 或 logs。
+如果选了另一个新目录，原目录数据不会自动迁移，需要在新目录重新登录。
+
+再次安装与卸载
+安装版后续升级会记住安装目录。可在 Windows“设置 → 应用 → 已安装的应用”中卸载。
+卸载只移除程序文件和快捷方式，保留账号配置、登录状态与任务数据，因此安装目录可能仍存在。
+
+这是独立开源工具，与雨课堂官方无隶属关系。

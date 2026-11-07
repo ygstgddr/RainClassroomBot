@@ -40,6 +40,7 @@ class Watchdog(threading.Thread):
         self.owned = {}
         self.restarts = deque()
         self.worker_target = worker_target
+        self.browser_recover = None
         # 用户输入文本只经过易失的进程队列，不写数据库/文件/日志。
         # 每次启动换一条队列和 generation，重启不会重放旧文字。
         self.typing_queue = None
@@ -125,6 +126,8 @@ class Watchdog(threading.Thread):
                     continue
                 self.cleanup()
                 self.store.recover()
+                if page_hung and self.browser_recover:
+                    self.browser_recover()
                 while self.restarts and now - self.restarts[0] > 3600:
                     self.restarts.popleft()
                 if len(self.restarts) >= self.config['max_restarts_per_hour']:

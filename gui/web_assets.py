@@ -5,9 +5,12 @@ import re
 import sys
 
 
-def load_document():
+def load_document(typing_window=False):
     base = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1])) / 'gui' / 'web'
     html = (base / 'index.html').read_text(encoding='utf8')
+    if typing_window:
+        html = html.replace('<html lang="zh-CN">', '<html lang="zh-CN" class="typing-window desktop-glass typing-opaque">', 1)
+        html = html.replace('雨课堂 · 学习工作台</span></div>', '雨课堂 · 模拟打字</span></div>', 1)
     css = (base / 'app.css').read_text(encoding='utf8')
     javascript = (base / 'app.js').read_text(encoding='utf8')
     html, replaced_css = re.subn(r'<link\b[^>]*href=[\"\']app\.css[\"\'][^>]*>',
