@@ -2,9 +2,9 @@
 
 基于 **Python + Playwright + Microsoft Edge + pywebview / WebView2** 的 Windows 桌面任务管理工具。按开课时间选择课程，扫描未完成任务，通过网页正常操作处理已适配的视频、图文和 PPT，并复查服务器完成记录。
 
-当前版本 **0.8.7**。需要 Windows 10/11 x64、Microsoft Edge 和 Microsoft Edge WebView2 Runtime。
+当前版本 **0.8.8**。需要 Windows 10/11 x64、Microsoft Edge 和 Microsoft Edge WebView2 Runtime。
 
-启动先显示玻璃登录页，点击“登录”后在软件内打开学习浏览器，确认账号后自动进入课程页。内置浏览器默认静音。安装时运行发布页中的 `RainClassroomBot-0.8.7-Windows-x64-Setup.exe`，按提示选择目录即可，无需 Python 或管理员权限。
+启动先显示玻璃登录页，点击“登录”后在软件内打开学习浏览器，确认账号后自动进入课程页。内置浏览器默认静音。安装时运行发布页中的 `RainClassroomBot-0.8.8-Windows-x64-Setup.exe`，按提示选择目录即可，无需 Python 或管理员权限。
 
 **旧版用户：**先正常退出助手，安装时选择原 `RainClassroomBot.exe` 所在文件夹，可继续使用原登录和任务数据。装到不同目录不会自动迁移账号。升级不覆盖已有配置，卸载也保留配置、登录与任务记录。详细说明见 [安装与升级](docs/INSTALLER.md)。
 
@@ -42,6 +42,7 @@
 | 一次开始 | 所选课程没有有效扫描结果时自动扫描；完整成功后继续执行，无需先后点击多个按钮 |
 | 网站切换 | 顶栏入口选择或输入网址，支持主站、长江站及地址历史；不同站点独立保存登录和任务 |
 | 学习浏览器 | 内置 WebView2 支持前进、返回、刷新、停止、主页和静音，显示网页加载及可识别的视频状态 |
+| 自动答题（实验性） | 在浏览器打开 DeepSeek 控制台，扫描课程作业和测验，授权后处理已适配的题页并显示逐题回执 |
 | 持续登录 | 各站点在自己的 `webview2_profile` 中保存登录，已有独立 Edge 会话仍可通过经典界面使用 |
 | 主动登录入口 | 点击“登录”后才打开内置学习浏览器，可在登录前切换学校站点 |
 | 课程选择 | 显示开课、结课时间，支持逐门选择、搜索、选择进行中课程、全选和清空 |
@@ -59,26 +60,27 @@
 | 减少重复工作 | 复用同一轮课程详情、去除相同状态的重复数据库提交；服务器查询与页面采样分开调度，慢网络时仍及时响应暂停 |
 | 日志管理 | 桌面最近日志、扫描异常列表以及本地日志文件 |
 
-**自动执行范围：**已适配且具有可靠进度数据的视频、图文、纯 PPT/课件。作业、考试、测验、签到、讨论，以及含答题或音视频页的课件需人工处理。程序不自动答题或提交作业，不构造学习心跳、伪造完成记录或跳转视频播放位置。
+常规学习队列自动处理已适配且具有可靠进度数据的视频、图文和纯 PPT/课件。签到、讨论以及含答题或音视频页的课件由使用者处理。作业和测验可在独立的实验性控制台按任务授权处理，交卷由使用者操作。学习进度以服务器记录为准。
 
 最高倍速来自播放器实际提供的菜单，不固定假设为 2 倍。速率重置或视频更换时重新检测。没有可用菜单时保持网站原速。
 
-## 安装：直接运行 Windows 版本
+## 安装 Windows 版本
 
 1. 安装 Microsoft Edge，并确认已安装 **Microsoft Edge WebView2 Runtime**。若缺少运行时，从 [Microsoft 官方下载页](https://developer.microsoft.com/en-us/microsoft-edge/webview2/consumer/)安装 Evergreen WebView2 Runtime 后再打开助手。
-2. 打开 [Releases](https://github.com/ygstgddr/RainClassroomBot/releases/latest)，下载 **RainClassroomBot-0.8.4-Windows-x64.zip**。
-3. 完整解压到有写入权限的目录，例如 `D:\Apps\RainClassroomBot`。
-4. 运行目录内的 `RainClassroomBot.exe`。此方式不需要安装 Python。
+2. 打开 [Releases](https://github.com/ygstgddr/RainClassroomBot/releases/latest)，下载 `RainClassroomBot-0.8.8-Windows-x64-Setup.exe`。
+3. 双击安装包。已有版本请选择原安装目录。安装后从开始菜单启动雨课堂助手。
 
-请保留 `_internal` 和 `config` 文件夹，不要单独移动 exe，也不要在压缩包内直接运行。GitHub 自动提供的 `Source code` 是源码，不是 Windows 程序。
-
-公开的 0.8.4 Windows 包使用独立 Edge。当前源码的默认桌面界面使用两个隔离的 WebView2 控件，分别显示本地工作台与学习网页。Playwright 接入学习控件，以同一会话执行扫描和任务。
-
-发布页提供 `SHA256SUMS.txt`。可在 PowerShell 中计算下载包的校验值并与它比较：
+发布页提供 `SHA256SUMS-0.8.8.txt`。可在 PowerShell 中计算下载包的校验值并比对。
 
 ```powershell
-Get-FileHash .\RainClassroomBot-Windows-x64.zip -Algorithm SHA256
+Get-FileHash .\RainClassroomBot-0.8.8-Windows-x64-Setup.exe -Algorithm SHA256
 ```
+
+## 自动答题（实验性）
+
+1. 登录后进入「浏览器」，点击工具栏的「自动答题（实验性）」。首次使用需要填写 DeepSeek API Key，保存后由 Windows DPAPI 加密存放在本机。
+2. 在「作业和测验」里点击「扫描任务」，再选择需要处理的一项并点击「交给 Agent」。此操作可能启动任务计时。已打开题页时也可使用「填写当前题页」。
+3. 网页中的可读题干、选项和共享材料会发送到 DeepSeek。两轮复核一致的答案才会写入。交卷前请逐题核对页面和控制台的「填写回执」。
 
 ## 使用教程：选课程，再点开始
 

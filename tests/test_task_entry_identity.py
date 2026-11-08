@@ -63,3 +63,43 @@ def test_identity_across_frames_collapsed_ancestors_and_ambiguous_fallback():
             finally:
                 await context.close()
     asyncio.run(scenario())
+
+
+def test_assessment_vue_identity_distinguishes_identical_titles_and_classrooms():
+    async def scenario(site):
+        async with async_playwright() as engine:
+            context = await engine.chromium.launch_persistent_context('', channel='msedge', headless=True)
+            try:
+                manager = EdgeManager({'base_url': site.url})
+                manager.context, manager.page = context, context.pages[0]
+                html = '''<div id="list"></div><script>
+                    function add(classroom, id, type) {
+                        const row = document.createElement('div');
+                        row.className = 'el-tooltip leaf-detail';
+                        row.innerHTML = '<div class="leaf-title"><span class="title">阅读练习</span></div>';
+                        const leaf = {$options:{_componentTag:'leaf-detail'}, $el:row,
+                            $props:{classroom_id:classroom, leafData:{id,leaf_type:type}}};
+                        row.__vue__ = {$options:{name:'ElTooltip'}, $parent:leaf};
+                        row.onclick = () => { window.chosen = classroom + ':' + id; };
+                        document.querySelector('#list').append(row);
+                    }
+                    add(11, 12, 5); add(10, 21, 5); add(10, 12, 5);
+                </script>'''
+                await context.route('**/studycontent', lambda route: route.fulfill(
+                    body=html, content_type='text/html; charset=utf-8'))
+                await manager.page.goto(site.url + '/studycontent')
+                task = dict(classroom_id='10', leaf_id='12', leaf_type=5, title='阅读练习')
+                entry = await manager.task_entry(task, require_id=True)
+                assert entry is not None
+                await entry.scroll_into_view_if_needed()
+                assert await manager.page.evaluate('window.chosen') is None
+                await entry.click()
+                await entry.dispose()
+                assert await manager.page.evaluate('window.chosen') == '10:12'
+                assert await manager.task_entry({**task, 'leaf_type': 6}, require_id=True) is None
+                await manager.page.evaluate('add(10, 12, 5)')
+                assert await manager.task_entry(task, require_id=True) is None
+            finally:
+                await context.close()
+    with MockSite() as site:
+        asyncio.run(scenario(site))

@@ -79,7 +79,7 @@
       <div class="page-host">
         <section id="page-browser" class="page-panel" aria-label="浏览器" hidden>
           <div id="browser-panel" class="browser-panel glass">
-            <div class="browser-heading"><strong>学习浏览器</strong><span id="browser-status" role="status"></span><button class="text-button" data-action="settings" type="button">站点与设置</button></div>
+            <div class="browser-heading"><strong>学习浏览器</strong><span id="browser-status" role="status"></span><button id="browser-assessment-tools" class="glass-button compact-button assessment-launch" data-action="assessment_toggle" type="button" aria-controls="assessment-panel" aria-expanded="false" hidden>自动答题(实验性)</button><button class="text-button" data-action="settings" type="button">站点与设置</button></div>
             <form id="browser-address-form" class="browser-toolbar" aria-label="浏览器工具栏">
               <button class="glass-button" data-browser-command="back" type="button" aria-label="返回" title="返回">←</button>
               <button class="glass-button" data-browser-command="forward" type="button" aria-label="前进" title="前进">→</button>
@@ -91,7 +91,70 @@
               <button id="browser-mute" class="glass-button" data-browser-command="mute" type="button">解除静音</button>
             </form>
             <div class="browser-status-row"><span id="browser-media">未检测到视频</span><button id="browser-pause" class="text-button" data-action="pause" type="button" hidden>暂停当前操作</button><button id="browser-recover" class="text-button" data-action="recover" type="button" hidden>重新连接</button><button id="browser-typing-tools" class="text-button" data-action="browser_typing_tools" type="button" hidden>打字控制</button></div>
-            <div id="browser-viewport" class="browser-viewport" aria-label="网页内容"><p>正在准备内置浏览器…</p></div>
+            <div class="browser-body">
+              <div id="browser-viewport" class="browser-viewport" aria-label="网页内容"><p>正在准备内置浏览器…</p></div>
+              <section id="assessment-panel" class="assessment-panel glass" aria-label="自动答题 Agent" hidden>
+                <header class="assessment-heading">
+                  <span class="assessment-mark"><svg class="icon"><use href="#i-sparkles"/></svg></span>
+                  <div class="assessment-heading-copy"><h3>答题控制台</h3><p>DeepSeek Agent <span>实验性</span></p></div>
+                  <div class="assessment-heading-actions">
+                    <button id="assessment-clear-chat" class="assessment-icon-button" data-action="assessment_clear_chat" type="button" title="新对话" aria-label="新对话"><svg class="icon"><use href="#i-file"/></svg></button>
+                    <button id="assessment-key-settings" class="assessment-icon-button" data-action="assessment_key_settings" type="button" title="密钥设置" aria-label="密钥设置" aria-expanded="false"><svg class="icon"><use href="#i-settings"/></svg></button>
+                    <button class="assessment-icon-button" data-action="assessment_toggle" type="button" title="收起控制台" aria-label="收起控制台"><svg class="icon"><use href="#i-close"/></svg></button>
+                  </div>
+                </header>
+                <form id="assessment-key-form" class="assessment-section">
+                  <span class="assessment-mark assessment-key-mark"><svg class="icon"><use href="#i-shield"/></svg></span>
+                  <h4>连接 DeepSeek</h4>
+                  <p>连接后即可在工作台里对话或处理题目。</p>
+                  <label for="assessment-key">DeepSeek API Key</label>
+                  <input id="assessment-key" type="password" maxlength="1024" placeholder="输入你的 API Key" autocomplete="off" spellcheck="false">
+                  <div class="assessment-actions">
+                    <button id="assessment-save-key" class="glass-button compact-button" type="submit">保存密钥</button>
+                    <button id="assessment-clear-key" class="text-button" data-action="assessment_clear_key" type="button" hidden>移除</button>
+                  </div>
+                  <p class="assessment-key-note"><svg class="icon"><use href="#i-shield"/></svg> 密钥加密保存在当前 Windows 用户下</p>
+                </form>
+                <nav id="assessment-agent-controls" class="assessment-nav" aria-label="控制台视图" hidden>
+                  <button class="is-active" data-action="assessment_tab_chat" type="button"><svg class="icon"><use href="#i-sparkles"/></svg>对话</button>
+                  <button data-action="assessment_tab_tasks" type="button"><svg class="icon"><use href="#i-list"/></svg>作业和测验 <span id="assessment-task-count" hidden></span></button>
+                </nav>
+                <div class="assessment-status-zone">
+                  <p id="assessment-message" class="assessment-status" role="status"></p>
+                  <div id="assessment-reconnect" class="assessment-reconnect" hidden>
+                    <p>工作台暂未连接</p><button class="text-button" data-action="recover" type="button">重新连接</button>
+                  </div>
+                </div>
+                <div id="assessment-chat-view" class="assessment-chat-view" hidden>
+                  <div id="assessment-chat" class="assessment-chat" aria-label="对话记录" role="log"></div>
+                </div>
+                <div id="assessment-task-view" class="assessment-task-view" hidden>
+                  <div class="assessment-task-toolbar">
+                    <div><h4>课程任务</h4><p id="assessment-progress" role="status"></p></div>
+                    <div class="assessment-actions"><button id="assessment-scan" class="glass-button compact-button" data-action="assessment_scan" type="button"><svg class="icon"><use href="#i-refresh"/></svg>扫描任务</button><button id="assessment-review" class="text-button" data-action="assessment_run_current" type="button">填写当前题页</button></div>
+                  </div>
+                  <p class="assessment-authorization">交给 Agent 后会自动进入并可能开始计时。交卷由你操作。</p>
+                  <div id="assessment-task-feed" class="assessment-task-feed">
+                    <details id="assessment-summary-details" class="assessment-summary" hidden><summary>扫描摘要</summary><p id="assessment-summary"></p></details>
+                    <div id="assessment-inventory" hidden><ul id="assessment-tasks" class="assessment-list"></ul></div>
+                    <div id="assessment-task-empty" class="assessment-task-empty"><svg class="icon"><use href="#i-list"/></svg><p>扫描后可以选择要交给 Agent 的任务。</p></div>
+                  </div>
+                </div>
+                <footer id="assessment-dock" class="assessment-dock" hidden>
+                  <div class="assessment-run-bar"><button id="assessment-read-started" class="glass-button compact-button" data-action="assessment_run_current" type="button" hidden>读取当前题页</button><button id="assessment-cancel" class="text-button" data-action="assessment_cancel" type="button" hidden><svg class="icon"><use href="#i-stop"/></svg>停止</button></div>
+                  <div class="assessment-composer">
+                    <form id="assessment-chat-form"><textarea id="assessment-chat-input" rows="2" maxlength="6000" placeholder="发消息给 DeepSeek…" aria-label="发消息给 DeepSeek" spellcheck="false"></textarea></form>
+                    <div class="assessment-composer-tools">
+                      <label for="assessment-model" class="sr-only">DeepSeek 模型</label><select id="assessment-model" title="DeepSeek 模型"><option value="deepseek-flash">Flash</option><option value="deepseek-v4-pro">V4 Pro</option></select>
+                      <label for="assessment-effort" class="sr-only">推理强度</label><select id="assessment-effort" title="推理强度"><option value="none">快速</option><option value="low">低强度</option><option value="high" selected>高强度</option><option value="max">最大强度</option></select>
+                      <label class="assessment-check" title="V4 Pro 提供联网搜索"><input id="assessment-web" type="checkbox"><svg class="icon"><use href="#i-globe"/></svg><span>联网</span></label>
+                      <label id="assessment-read-toggle" class="assessment-check" title="允许读取当前网页"><input id="assessment-read-page" type="checkbox"><svg class="icon"><use href="#i-file"/></svg><span>读网页</span></label>
+                      <button id="assessment-send" class="assessment-send" form="assessment-chat-form" type="submit" title="发送 (Enter)" aria-label="发送"><svg class="icon"><use href="#i-arrow"/></svg></button>
+                    </div>
+                  </div>
+                </footer>
+              </section>
+            </div>
           </div>
         </section>
         <section id="page-courses" class="page-panel is-active" aria-labelledby="courses-title"><div class="section-heading"><div><h2 id="courses-title">我的课程 <span id="course-visible-count" class="title-count"></span></h2><p>只处理你选中的课程。课程时间由网站提供。</p></div><div class="section-tools"><button class="icon-button glass-button" data-action="load_courses" aria-label="刷新课程" title="刷新课程"><svg class="icon"><use href="#i-refresh"/></svg></button></div></div><div class="filter-bar glass"><label class="search-field"><svg class="icon"><use href="#i-search"/></svg><input id="course-search" type="search" placeholder="搜索课程名称…" aria-label="搜索课程" autocomplete="off"></label><div class="segmented" id="course-filter" role="group" aria-label="筛选课程"><button class="is-active" data-course-filter="all">全部课程</button><button data-course-filter="current">进行中</button><button data-course-filter="selected">已选择</button></div><div class="filter-actions"><button data-action="select_current" class="text-button">选择进行中</button><button data-action="select_all" class="text-button">全选</button><button data-action="select_clear" class="text-button muted">清空</button></div></div><div id="course-list" class="course-grid"></div><div id="course-empty" class="empty-state glass" hidden></div></section>

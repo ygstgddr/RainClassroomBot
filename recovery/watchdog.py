@@ -121,7 +121,7 @@ class Watchdog(threading.Thread):
                 dead = not self.process.is_alive()
                 hung = now - self.store.get('heartbeat', now) > self.config['watchdog_timeout_seconds']
                 typing_active = self.store.get('typing_status', {}).get('phase') in ('selecting', 'ready', 'running', 'paused')
-                page_hung = (desired in ('catalog', 'scan', 'run') or typing_active) and now - self.store.get('page_heartbeat', now) > self.config['watchdog_timeout_seconds']
+                page_hung = (desired in ('catalog', 'scan', 'run', 'assessment_open') or typing_active) and now - self.store.get('page_heartbeat', now) > self.config['watchdog_timeout_seconds']
                 if not (dead or hung or page_hung):
                     continue
                 self.cleanup()

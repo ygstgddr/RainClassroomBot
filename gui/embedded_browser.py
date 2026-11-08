@@ -1,8 +1,12 @@
 """Own the learning WebView2 on the WinForms thread, separate from the UI bridge."""
+from copy import deepcopy
+import hashlib
+import json
 from pathlib import Path
 import socket
 import threading
 from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
 
 
 def browser_url(value):
@@ -26,6 +30,12 @@ class EmbeddedBrowser:
         self.ports = {}
         self.rect = None
         self.interactive = True
+        self.navigation_revision = 0
+        self._document_url = ''
+        self._assessment_registry = f'_rain_assessment_{uuid4().hex}'
+        self._assessment_lock = threading.Lock()
+        self._assessment_capture = None
+        self._assessment_surface = None
         self.recovery_timer = None
         self.recovery_attempts = 0
         self.state = {'phase': 'idle', 'message': '内置浏览器尚未连接'}
@@ -38,6 +48,9 @@ class EmbeddedBrowser:
 
     def snapshot(self):
         return dict(self.state)
+
+    def document_digest(self):
+        return hashlib.sha256(self._document_url.encode('utf-8')).hexdigest()
 
     def connect(self, config):
         """Wait off the GUI thread for one control with a site-specific profile."""
@@ -116,6 +129,7 @@ class EmbeddedBrowser:
         except ValueError:
             args.Cancel = True
             return
+        self.navigation_revision += 1
         self.state = {**self.state, 'phase': 'loading', 'message': '网页加载中…'}
 
     def _navigation_completed(self, core, args):
@@ -124,9 +138,13 @@ class EmbeddedBrowser:
         self._source_changed(core, args)
 
     def _source_changed(self, core, _):
-        parts = urlsplit(str(core.Source or ''))
+        document_url = str(core.Source or '')
+        parts = urlsplit(document_url)
         # Avoid exposing course signatures and login callback parameters in the toolbar.
         source = urlunsplit((parts.scheme, parts.netloc, parts.path, '', '')) if parts.hostname else ''
+        if document_url != self._document_url:
+            self.navigation_revision += 1
+            self._document_url = document_url
         self.state = {**self.state, 'url': source, 'title': str(core.DocumentTitle or '')[:180],
                       'back': bool(core.CanGoBack), 'forward': bool(core.CanGoForward), 'muted': bool(core.IsMuted)}
 
@@ -222,6 +240,148 @@ class EmbeddedBrowser:
         self.invoke(apply)
         return available
 
+    def _assessment_run(self, build_script, expected_revision=None, *, writing=False, cancelled=None):
+        """Use the WinForms thread for dispatch and await the result on the caller's worker."""
+        from browser.assessment_route import assessment_origin
+
+        pending = None
+        core = None
+        source = ''
+        revision = 0
+        start_error = ''
+
+        def start():
+            nonlocal pending, core, source, revision, start_error
+            if cancelled and cancelled():
+                start_error = '操作已停止，请重新确认后再填写。'
+                return
+            core = self.control.CoreWebView2 if self.control else None
+            if core is None or self.state['phase'] != 'ready' or self.rect is None or (writing and not self.interactive):
+                start_error = '请先打开并等待可操作的题页加载。'
+                return
+            source = str(core.Source)
+            revision = self.navigation_revision
+            if expected_revision is not None and revision != expected_revision:
+                start_error = '题页已改变，请重新读取。'
+                return
+            origin = assessment_origin(source, self.home)
+            if origin is None:
+                start_error = '当前网页不是此雨课堂站点或已适配的考试题页。'
+                return
+            pending = core.ExecuteScriptAsync(build_script(origin, self._assessment_registry))
+
+        self.invoke(start)
+        if start_error:
+            raise ValueError(start_error)
+        try:
+            if pending is None or not pending.Wait(8000):
+                raise ValueError('题页操作超时，请核对当前页面。')
+            result = json.loads(str(pending.Result))
+        except (TypeError, json.JSONDecodeError):
+            raise ValueError('题页没有返回有效内容，请重试。') from None
+
+        same_document = False
+
+        def check_document():
+            nonlocal same_document
+            same_document = (self.control is not None and self.control.CoreWebView2 == core
+                             and str(core.Source) == source and self.navigation_revision == revision)
+
+        self.invoke(check_document)
+        if not same_document:
+            raise ValueError('操作期间题页已改变，请核对当前页面。')
+        if not isinstance(result, dict):
+            raise ValueError('题页没有返回有效内容，请重试。')
+        if result.get('error'):
+            raise ValueError(result['error'])
+        return result, revision
+
+    def read_assessment_surface(self):
+        """Return a bounded observation without control values or link targets."""
+        from browser.assessment_page import surface_script
+
+        with self._assessment_lock:
+            result, revision = self._assessment_run(surface_script)
+            surface = {key: result[key] for key in ('title', 'text', 'controls')}
+            surface['revision'] = revision
+            self._assessment_surface = deepcopy(surface)
+            return surface
+
+    def read_assessment_page(self, surface=None, groups=None):
+        """Read standard questions or adopt groups of observed native controls."""
+        from browser.assessment_page import adapt_groups, normalize_capture, question_script
+
+        with self._assessment_lock:
+            proposals = None
+            revision = None
+            if surface is not None or groups is not None:
+                if surface is None or surface != self._assessment_surface:
+                    raise ValueError('题页观测已过期，请重新观察。')
+                proposals = adapt_groups(surface, groups)
+                revision = surface['revision']
+            result, revision = self._assessment_run(
+                lambda origin, registry: question_script(origin, registry, proposals), revision)
+            questions, warnings = normalize_capture(result)
+            capture = questions, warnings, revision
+            self._assessment_capture = deepcopy(capture), result, proposals
+            return capture
+
+    def _revalidate_assessment(self, capture):
+        from browser.assessment_page import question_script
+
+        if self._assessment_capture is None or capture != self._assessment_capture[0]:
+            raise ValueError('题页读取结果已过期，请重新读取。')
+        _, expected, proposals = self._assessment_capture
+        current, _ = self._assessment_run(
+            lambda origin, registry: question_script(origin, registry, proposals), capture[2])
+        if current != expected:
+            raise ValueError('题页内容或答题控件已变化，请重新读取。')
+        return expected, proposals
+
+    def revalidate_assessment_page(self, capture):
+        with self._assessment_lock:
+            self._revalidate_assessment(capture)
+            return capture
+
+    def fill_assessment_answers(self, capture, answers, *, cancelled=None):
+        """Revalidate the reviewed capture and fill only eligible empty fields."""
+        from browser.assessment_page import fill_script, verify_fill_script
+
+        if not isinstance(answers, dict) or len(answers) > 80 or any(
+                not isinstance(key, str) or not key.isdecimal() or len(key) > 2 for key in answers):
+            raise ValueError('待填写的答案格式无效。')
+        with self._assessment_lock:
+            expected, proposals = self._revalidate_assessment(capture)
+            questions = {question['id']: question for question in capture[0]}
+            eligible, errors = {}, {}
+            for key, answer in answers.items():
+                question = questions.get(key)
+                if question is None or question['issues']:
+                    errors[key] = '未找到可安全填写的题目。'
+                    continue
+                if question['kind'] == 'multiple':
+                    valid = isinstance(answer, list) and 1 <= len(answer) <= 20 and all(
+                        isinstance(value, str) and len(value) <= 2 for value in answer)
+                else:
+                    valid = isinstance(answer, str) and 1 <= len(answer) <= 1000
+                if valid:
+                    eligible[key] = answer
+                else:
+                    errors[key] = '待填写的答案格式无效。'
+            if not eligible:
+                return {'filled': [], 'errors': errors}
+            result, _ = self._assessment_run(lambda origin, registry: fill_script(
+                origin, registry, proposals, expected, eligible), capture[2], writing=True, cancelled=cancelled)
+            filled = result['filled']
+            errors.update(result['errors'])
+            if pending := result.get('pending'):
+                verified, _ = self._assessment_run(lambda origin, registry: verify_fill_script(
+                    origin, registry, proposals, expected, pending), capture[2])
+                filled.extend(verified['filled'])
+                for question_id in set(pending) - set(verified['filled']):
+                    errors[question_id] = '页面未确认选中，请核对这道题。'
+            return {'filled': filled, 'errors': errors}
+
     def command(self, name, url=None):
         def apply():
             core = self.control.CoreWebView2 if self.control else None
@@ -248,6 +408,10 @@ class EmbeddedBrowser:
         self._post(apply)
 
     def _dispose(self):
+        self.navigation_revision += 1
+        self._document_url = ''
+        self._assessment_capture = None
+        self._assessment_surface = None
         if self.recovery_timer:
             self.recovery_timer.Stop()
             self.recovery_timer.Dispose()

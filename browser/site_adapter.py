@@ -208,7 +208,7 @@ class SiteAdapter:
             raise AdaptationRequired('缺少服务器 leaf_schedules，无法确认完成')
         return data['leaf_schedules']
 
-    async def scan_course(self, course):
+    async def scan_course(self, course, *, assessments_only=False):
         cid = course['classroom_id']
         self.report(course, '读取课程访问参数')
         params = await self.context(cid)
@@ -217,6 +217,10 @@ class SiteAdapter:
         if not isinstance(data, dict) or 'course_chapter' not in data:
             raise AdaptationRequired('该课程不是已适配的 LMS 章节课程，需人工查看')
         nodes = list(leaves(data['course_chapter']))
+        if assessments_only:
+            if any(type(leaf['leaf_type']) is not int for leaf in nodes):
+                raise AdaptationRequired('任务类型字段不是整数')
+            nodes = [leaf for leaf in nodes if task_kind(leaf['leaf_type']) in ('homework', 'quiz', 'exam')]
         if not nodes:
             return []  # 目录确认为空时，不调用不适用的进度接口。
         self.report(course, '读取服务器进度')
@@ -230,6 +234,8 @@ class SiteAdapter:
             done, progress = leaf_completion(typ, schedules, lid)
             kind = task_kind(typ)
             state = 'completed' if done else 'locked' if leaf.get('is_locked') else 'manual' if kind not in AUTOMATED_KINDS else 'pending'
+            if assessments_only and done is None and state != 'locked':
+                state = 'unknown'
             note = manual_note(typ) if state == 'manual' else ''
             if state == 'pending' and lid not in schedules and typ in (0, 3):
                 note = '服务器尚无进度记录；打开任务后持续查询，明确记录完成才进入下一项'

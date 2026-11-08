@@ -2,7 +2,7 @@
 
 ## 安装
 
-双击 `RainClassroomBot-0.8.7-Windows-x64-Setup.exe`，阅读说明后选择安装目录，按需勾选桌面快捷方式。默认安装到 `%LOCALAPPDATA%\Programs\RainClassroomBot`，仅供当前 Windows 用户使用，无需管理员权限。
+双击 `RainClassroomBot-0.8.8-Windows-x64-Setup.exe`，阅读说明后选择安装目录，按需勾选桌面快捷方式。默认安装到 `%LOCALAPPDATA%\Programs\RainClassroomBot`，仅供当前 Windows 用户使用，无需管理员权限。
 
 安装包已包含 Python 与程序依赖；电脑仍需安装 Microsoft Edge 和 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/consumer/)。安装器不会自动下载安装浏览器组件。安装完成后可以从开始菜单打开程序。
 

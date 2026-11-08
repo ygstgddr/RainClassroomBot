@@ -16,7 +16,9 @@
   const taskAutomatic = (t) => t.execution_group ? t.execution_group === 'automatic' : ['video', 'article', 'slides'].includes(t.type) && !['manual', 'needs_adapter'].includes(t.status);
   const taskSelectable = (t) => t.selectable ?? (taskAutomatic(t) && ['pending', 'failed'].includes(t.status));
   const taskHidden = (t) => t.hidden_until_open === true || (t.status === 'locked' && (t.type === 'homework' || /作业/.test(t.type_label || '')));
-  const fingerprints = { courses: '', tasks: '', activity: '', history: '' };
+  const fingerprints = { courses: '', tasks: '', activity: '', history: '', assessment: '', chat: '' };
+  let assessmentTab = 'chat', assessmentKeySettings = false;
+  let assessmentFeedback = '';
   let pollTimer = null, pollRunning = false, snapshotPromise = null, pollGeneration = 0, toastTimer = null, errorsInRow = 0, filtersInitialized = false;
   let browserRect, browserLayoutFrame = 0, browserLayoutCall = Promise.resolve();
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -92,10 +94,190 @@
     $('browser-pause').disabled = ui.pending;
     $('browser-recover').hidden = b.phase !== 'error' && s?.state.phase !== 'error' && s?.state.login_status !== 'error';
     $('browser-typing-tools').hidden = login || !(s?.separate_typing || s?.typing.target);
+    renderAssessment();
     const m = b.media || {};
     const time = seconds => Number.isFinite(seconds) ? `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}` : '—';
     setText('browser-media', m.state ? `${m.state} · ${time(m.time)} / ${time(m.duration)} · ${m.rate}×` : '未检测到视频');
     requestBrowserLayout();
+  }
+
+  function renderAssessment() {
+    const s = ui.snapshot, a = s?.assessment || {};
+    const button = $('browser-assessment-tools'), panel = $('assessment-panel');
+    button.hidden = loginGate() || !s?.browser?.enabled || !s.assessment;
+    if (button.hidden) {
+      panel.hidden = true;
+      button.setAttribute('aria-expanded', 'false');
+      $('assessment-key').value = '';
+      return;
+    }
+    const scanning = ['queued', 'running'].includes(a.phase);
+    const opening = ['queued', 'opening'].includes(a.entry?.phase);
+    const busy = ui.pending || Boolean(a.operation);
+    const browserBusy = busy || s.state.busy || !a.available;
+    const keyOpen = !a.has_key || assessmentKeySettings;
+    const chatting = !keyOpen && assessmentTab === 'chat';
+    const tasksOpen = !keyOpen && assessmentTab === 'tasks';
+    $('assessment-reconnect').hidden = Boolean(a.available);
+    $('assessment-reconnect').querySelector('button').disabled = ui.pending;
+    $('assessment-key-form').hidden = !keyOpen;
+    $('assessment-key-settings').disabled = busy || !a.has_key;
+    $('assessment-key-settings').setAttribute('aria-expanded', String(keyOpen));
+    $('assessment-clear-key').hidden = !a.has_key;
+    $('assessment-key').disabled = $('assessment-save-key').disabled = $('assessment-clear-key').disabled = busy;
+    $('assessment-agent-controls').hidden = keyOpen;
+    $('assessment-chat-view').hidden = !chatting;
+    $('assessment-task-view').hidden = !tasksOpen;
+    $('assessment-dock').hidden = keyOpen;
+    $('assessment-chat-form').hidden = $('assessment-read-toggle').hidden = $('assessment-send').hidden = !chatting;
+    document.querySelectorAll('.assessment-nav button').forEach(item => {
+      const active = item.dataset.action === 'assessment_tab_' + assessmentTab;
+      item.classList.toggle('is-active', active);
+      item.setAttribute('aria-pressed', String(active));
+    });
+    $('assessment-model').disabled = $('assessment-effort').disabled = busy;
+    $('assessment-web').disabled = busy || $('assessment-model').value !== 'deepseek-v4-pro';
+    $('assessment-cancel').hidden = !scanning && !opening && !a.operation;
+    $('assessment-cancel').disabled = ui.pending;
+    $('assessment-scan').disabled = browserBusy || !a.has_key;
+    $('assessment-review').disabled = browserBusy || !a.has_key || s.browser.phase !== 'ready';
+    $('assessment-read-started').hidden = a.entry?.phase !== 'awaiting_start' || Boolean(a.operation);
+    $('assessment-read-started').disabled = $('assessment-review').disabled;
+    $('assessment-read-page').disabled = browserBusy;
+    if (!a.available) $('assessment-read-page').checked = false;
+    $('assessment-chat-input').disabled = $('assessment-send').disabled = busy || !a.has_key;
+    $('assessment-clear-chat').disabled = busy || keyOpen || !a.history?.length;
+    if (panel.hidden) return;
+
+    const stats = a.stats || {}, tasks = a.tasks || [];
+    const types = stats['按类型'] || {};
+    const progress = scanning ? `扫描课程 ${stats['已扫描课程'] || 0} / ${stats['课程数'] || '…'}` :
+      `作业 ${types.homework || 0} · 测验 ${types.quiz || 0} · 考试 ${types.exam || 0}`;
+    const failures = a.failed?.length ? ` · ${a.failed.length} 门课程读取失败` : '';
+    setText('assessment-progress', a.phase === 'idle' ? '扫描当前账号的课程' : progress + failures);
+    const summary = a.operation === 'summary' ? 'DeepSeek 正在汇总…' : a.summary || a.scan_message;
+    $('assessment-summary-details').hidden = !summary;
+    setText('assessment-summary', summary);
+    $('assessment-task-count').hidden = !tasks.length;
+    setText('assessment-task-count', tasks.length);
+    setText('assessment-message', assessmentFeedback || a.message ||
+      (a.operation === 'agent' && chatting ? '' : a.entry?.message || ''));
+
+    const hash = fingerprint([tasks, a.failed, browserBusy]);
+    if (fingerprints.assessment !== hash) {
+      fingerprints.assessment = hash;
+      $('assessment-inventory').hidden = !tasks.length && !a.failed?.length;
+      $('assessment-task-empty').hidden = !$('assessment-inventory').hidden;
+      const list = document.createDocumentFragment();
+      const occurrences = new Map();
+      const taskName = t => JSON.stringify([t.course, t.title]);
+      tasks.forEach(t => occurrences.set(taskName(t), (occurrences.get(taskName(t)) || 0) + 1));
+      tasks.forEach(t => {
+        const item = make('li', 'assessment-task');
+        const copy = make('div');
+        const classroom = occurrences.get(taskName(t)) > 1 ? ` · 班级 ${asText(t.id).split(':')[0]}` : '';
+        copy.append(make('strong', '', t.title),
+          make('p', '', `${t.course}${classroom} · ${typeNames[t.kind] || t.kind} · ${({ completed: '已完成', locked: '未开放', manual: '可核对', unknown: '进度未知' })[t.state] || t.state}`));
+        item.append(copy);
+        if (!['completed', 'locked'].includes(t.state)) {
+          const open = actionButton('交给 Agent', 'assessment_select_task');
+          open.title = '自动进入此任务，可能立即开始计时';
+          open.dataset.id = t.id;
+          open.disabled = browserBusy;
+          item.append(open);
+        }
+        list.append(item);
+      });
+      (a.failed || []).forEach(name => list.append(make('li', '', `${name} · 读取失败`)));
+      $('assessment-tasks').replaceChildren(list);
+    }
+    renderAssessmentChat(a.history || [], a.operation === 'agent' ? (a.steps || []).at(-1) || '正在请求模型' : '', a.fill_receipt);
+  }
+
+  function assessmentReceipt(result) {
+    if (!result || (!Array.isArray(result.filled) && !result.error)) return null;
+    const card = make('div', 'assessment-receipt');
+    card.append(make('strong', '', result.filled ? `填写回执 · 已写入 ${result.filled.length} 题` : '填写回执 · 未能写入'));
+    if (result.error) card.append(make('p', '', result.error));
+    const notes = make('ul');
+    Object.entries(result.review_notes || {}).forEach(([id, reason]) => {
+      notes.append(make('li', '', `第 ${id} 题 · 未通过复核 · ${reason}`));
+    });
+    Object.entries(result.errors || {}).forEach(([id, reason]) => {
+      notes.append(make('li', '', `第 ${id} 题 · 未写入 · ${reason}`));
+    });
+    if (result.corrected?.length) {
+      notes.append(make('li', '', `按两轮复核结果修正并写入 · 第 ${result.corrected.join('、')} 题`));
+    }
+    if (notes.childElementCount) card.append(notes);
+    return card;
+  }
+
+  function renderAssessmentChat(history, liveStep, receipt) {
+    const hash = fingerprint([history, liveStep, receipt]);
+    if (fingerprints.chat === hash) return;
+    fingerprints.chat = hash;
+    const log = $('assessment-chat'), messages = document.createDocumentFragment();
+    const top = log.scrollTop;
+    const nearBottom = log.scrollHeight - top - log.clientHeight < 55;
+    const openDetails = new Set([...log.querySelectorAll('details[open]')].map(node => node.dataset.messageKey));
+    if (!history.length) {
+      const welcome = make('div', 'assessment-welcome');
+      const mark = make('span', 'assessment-mark');
+      mark.append(icon('sparkles'));
+      welcome.append(mark, make('h4', '', '想聊点什么？'),
+        make('p', '', '问 DeepSeek 一个问题，或让 Agent 处理你选中的课程任务。'),
+        actionButton('查看作业和测验', 'assessment_tab_tasks', 'list'));
+      messages.append(welcome);
+    }
+    history.forEach((item, index) => {
+      const user = item.role === 'user';
+      const entry = make('article', user ? 'assessment-message assessment-user' : 'assessment-message');
+      entry.setAttribute('aria-label', user ? '你' : 'DeepSeek');
+      if (!user) {
+        const label = make('div', 'assessment-assistant-label');
+        label.append(icon('sparkles'), make('span', '', 'DeepSeek'));
+        entry.append(label);
+      }
+      if (item.reasoning || item.steps?.length) {
+        const details = make('details', 'assessment-reasoning');
+        details.dataset.messageKey = `${index}:${asText(item.text).slice(0, 100)}`;
+        details.open = openDetails.has(details.dataset.messageKey);
+        details.append(make('summary', '', item.reasoning ? '推理与工具步骤' : '工具步骤'));
+        if (item.steps?.length) {
+          const steps = make('ol', 'assessment-steps');
+          item.steps.forEach(step => steps.append(make('li', '', step)));
+          details.append(steps);
+        }
+        if (item.reasoning) details.append(make('p', 'assessment-chat-text', item.reasoning));
+        entry.append(details);
+      }
+      entry.append(make('p', 'assessment-chat-text', item.text));
+      const sources = make('div', 'assessment-sources');
+      (item.sources || []).forEach(source => {
+        const link = make('a', 'assessment-source', source.title || source.url);
+        try {
+          const url = new URL(source.url);
+          if (url.protocol !== 'https:' && url.protocol !== 'http:') return;
+          link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer';
+          sources.append(link);
+        } catch { /* omit invalid source */ }
+      });
+      if (sources.childElementCount) entry.append(sources);
+      const toolResult = assessmentReceipt(item.receipt);
+      if (toolResult) entry.append(toolResult);
+      messages.append(entry);
+    });
+    const toolResult = assessmentReceipt(receipt);
+    if (toolResult) messages.append(toolResult);
+    if (liveStep) messages.append(make('p', 'assessment-live', liveStep));
+    log.replaceChildren(messages);
+    log.scrollTop = nearBottom || history.at(-1)?.role === 'user' ? log.scrollHeight : top;
+  }
+
+  function assessmentOptions() {
+    const model = $('assessment-model').value;
+    return { model, effort: $('assessment-effort').value, web_search: model === 'deepseek-v4-pro' && $('assessment-web').checked };
   }
 
   function syncBrowserLayout() {
@@ -140,7 +322,7 @@
     setText('login-site-label', label);
     setText('login-destination-name', label);
     setText('login-destination-url', s.site.url || '请选择你学校使用的雨课堂站点');
-    setText('login-version', s.version ? '工作台 · v' + s.version.replace(/^v/, '') : '雨课堂学习工作台');
+    setText('login-version', s.version ? '工作台 · v' + s.version.replace(/^v/, '') + (s.development ? ' · 开发版' : '') : '雨课堂学习工作台');
     setText('login-panel-title', status === 'waiting' ? '在浏览器中完成登录' : status === 'error' ? '重新连接，继续就好' : '连接你的学习账号');
     const defaults = { idle: '点击后打开 Edge，确认登录后自动进入课程页。', connecting: '正在打开 Edge 并检查已有登录状态…', waiting: '请在 Edge 中完成登录，这里会自动同步。', error: '暂时未能连接，请重新登录或检查站点地址。' };
     const message = s.state.login_message || defaults[status] || defaults.idle;
@@ -211,7 +393,7 @@
     const avatar = $('account-avatar');
     const initial = s.account.logged_in && s.account.name ? String(s.account.name).trim().slice(0, 1) : '';
     if (avatar.dataset.initial !== initial) { avatar.replaceChildren(initial ? document.createTextNode(initial) : icon('user')); avatar.dataset.initial = initial; }
-    setText('version-label', s.version ? 'v' + s.version.replace(/^v/, '') : '');
+    setText('version-label', s.version ? 'v' + s.version.replace(/^v/, '') + (s.development ? ' · 开发版' : '') : '');
     setText('selection-summary', counts.selected ? `${counts.selected} 门已选课程 · 自动安排任务` : '尚未选择课程');
     setText('nav-course-count', counts.courses);
     setText('nav-task-count', counts.tasks);
@@ -558,6 +740,7 @@
 
   function syncDisabled() {
     if (typingWindow) { syncTypingControls(); return; }
+    renderAssessment();
     const s = ui.snapshot, busy = locked();
     $('primary-button').disabled = ui.pending || !s || !s.state.primary || !s.state.primary.enabled;
     $('primary-button').setAttribute('aria-busy', String(ui.pending));
@@ -681,6 +864,7 @@
       if (result && result.message) showToast(result.message, result.ok === false);
       if (result && result.ok === false && name === 'switch_site') setText('site-error', result.message || '站点切换未成功');
       await refreshSnapshot(true);
+      return result;
     } catch (error) {
       showToast('操作暂未成功，请稍后重试；详细信息可查看运行记录。', true);
     } finally {
@@ -694,6 +878,45 @@
   }
 
   async function handleAction(action, target) {
+    if (action === 'assessment_toggle') {
+      const panel = $('assessment-panel');
+      panel.hidden = !panel.hidden;
+      $('browser-assessment-tools').setAttribute('aria-expanded', String(!panel.hidden));
+      if (panel.hidden) $('assessment-key').value = '';
+      renderAssessment();
+      requestBrowserLayout();
+      if (!panel.hidden) await sendAction('assessment_console');
+      return;
+    }
+    if (action === 'assessment_key_settings') {
+      assessmentKeySettings = !assessmentKeySettings;
+      renderAssessment();
+      if (!$('assessment-key-form').hidden) $('assessment-key').focus();
+      return;
+    }
+    if (action === 'assessment_tab_chat' || action === 'assessment_tab_tasks') {
+      assessmentTab = action === 'assessment_tab_chat' ? 'chat' : 'tasks';
+      renderAssessment();
+      return;
+    }
+    if (action === 'assessment_select_task') {
+      assessmentFeedback = '正在进入所选任务…';
+      renderAssessment();
+      const result = await sendAction(action, { ...assessmentOptions(), id: target.dataset.id });
+      assessmentFeedback = result?.ok ? '' : result?.message || '任务未能启动，请稍后重试。';
+      if (result?.ok) assessmentTab = 'chat';
+      renderAssessment();
+      return;
+    }
+    if (action === 'assessment_run_current') {
+      const result = await sendAction(action, assessmentOptions());
+      assessmentFeedback = result?.ok ? '' : result?.message || '操作未能启动，请重试。';
+      if (result?.ok) {
+        assessmentTab = 'chat';
+      }
+      renderAssessment();
+      return;
+    }
     if (action === 'browser_typing_tools') {
       if (ui.snapshot?.separate_typing) await sendAction('open_typing_window');
       else navigate('tools');
@@ -742,6 +965,36 @@
   $('browser-address-form').addEventListener('submit', event => {
     event.preventDefault();
     if (!$('browser-go').disabled) sendAction('browser_command', { command: 'go', url: $('browser-address').value.trim() });
+  });
+  $('assessment-key-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    if ($('assessment-save-key').disabled) return;
+    const field = $('assessment-key'), api_key = field.value.trim();
+    if (!api_key) { field.focus(); return; }
+    field.value = '';
+    if ((await sendAction('assessment_save_key', { api_key }))?.ok) {
+      assessmentKeySettings = false;
+      renderAssessment();
+      $('assessment-chat-input').focus();
+    }
+  });
+  $('assessment-chat-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const input = $('assessment-chat-input'), text = input.value.trim();
+    if (!text || $('assessment-send').disabled) return;
+    const readPage = $('assessment-read-page');
+    const result = await sendAction('assessment_chat', { ...assessmentOptions(), text, read_page: readPage.checked && !readPage.disabled });
+    if (result?.ok) input.value = '';
+  });
+  $('assessment-chat-input').addEventListener('keydown', event => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      $('assessment-chat-form').requestSubmit();
+    }
+  });
+  $('assessment-model').addEventListener('change', () => {
+    if ($('assessment-model').value !== 'deepseek-v4-pro') $('assessment-web').checked = false;
+    renderAssessment();
   });
   document.querySelectorAll('[data-browser-command]').forEach(button => button.addEventListener('click', () => {
     if (!button.disabled) sendAction('browser_command', { command: button.dataset.browserCommand });

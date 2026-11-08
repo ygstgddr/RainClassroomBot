@@ -175,6 +175,14 @@ async def worker_async(config):
                         await asyncio.sleep(.5)
                 elif desired in ('catalog', 'scan', 'run'):
                     await flow.perform(desired)
+                elif desired == 'assessment_scan':
+                    from task.assessment_scan import scan_assessments
+                    target = await scan_assessments(adapter, store, config['scan_concurrency'])
+                    flow.transition(desired, target)
+                elif desired == 'assessment_open':
+                    from task.assessment_scan import open_assessment
+                    target = await open_assessment(adapter, browser, store)
+                    flow.transition(desired, target)
                 else:
                     flow.transition(desired, 'idle')
             except Interrupted:

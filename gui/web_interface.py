@@ -10,6 +10,7 @@ import json
 import math
 import os
 import re
+import sys
 import threading
 import time
 import uuid
@@ -22,12 +23,13 @@ from core.courses import course_state, date_text
 from core.sites import PRESETS, normalize_site, prepare_site, read_sites, save_site, site_config
 from core.task_types import AUTOMATED_KINDS, type_label
 from core.updater import UpdateManager
+from gui.assessment_panel import AssessmentPanel
 from gui.window_frame import WindowFrame
 
 
 STATES = {'pending': '待处理', 'running': '进行中', 'completed': '服务器已确认',
           'manual': '需手动完成', 'locked': '未开放', 'needs_adapter': '需要适配', 'failed': '失败'}
-ACTIVE = frozenset(('run', 'scan', 'catalog', 'login'))
+ACTIVE = frozenset(('run', 'scan', 'catalog', 'login', 'assessment_scan', 'assessment_open'))
 TYPING_ACTIVE = frozenset(('selecting', 'ready', 'running', 'paused'))
 TYPING_PHASES = TYPING_ACTIVE | frozenset(('idle', 'completed', 'stopped', 'error'))
 
@@ -79,6 +81,7 @@ class WebInterface:
         self._changed = time.time()
         self._filters = {'task_type': 'all', 'unfinished_only': True}
         self._typing_pending = None
+        self.assessment = AssessmentPanel(self)
         self._deferred_login = bool(defer_login and not demo)
         self._login_gate = self._deferred_login
         self._login_session = None
@@ -107,7 +110,7 @@ class WebInterface:
         return {**self.embedded_browser.snapshot(), 'enabled': True,
                 'login_surface': bool(self._login_gate and self._login_session and (self.switching or self.watchdog)),
                 'can_navigate': interactive and not typing['pending'] and typing['phase'] not in TYPING_ACTIVE,
-                'can_pause': not self._login_gate and desired in ('catalog', 'scan', 'run'),
+                'can_pause': not self._login_gate and desired in ('catalog', 'scan', 'run', 'assessment_scan', 'assessment_open'),
                 'media': media}
 
     def _notify(self, message):
@@ -120,7 +123,7 @@ class WebInterface:
 
     def _busy(self):
         return (self.switching or self.closing or self.store.get('worker_busy', False)
-                or self.store.get('desired', 'idle') in ACTIVE or self._typing_locked())
+                or self.store.get('desired', 'idle') in ACTIVE or self._typing_locked() or self.assessment.owns_browser)
 
     def _typing_locked(self):
         state = self.store.get('typing_status', {})
@@ -178,6 +181,8 @@ class WebInterface:
             return {'label': '正在暂停…', 'action': 'none', 'enabled': False}
         if self._typing_locked():
             return {'label': '请先结束手动打字', 'action': 'none', 'enabled': False}
+        if self.assessment.owns_browser:
+            return {'label': '答题 Agent 正在使用浏览器', 'action': 'none', 'enabled': False}
         if not account.get('id') or not courses:
             return {'label': '连接课程', 'action': 'load_courses', 'enabled': True}
         if not selected:
@@ -226,7 +231,7 @@ class WebInterface:
             scanning = desired in ('catalog', 'scan', 'run') and scan_status in ('queued', 'running')
             phase = ('closing' if self.closing else 'switching' if self.switching else 'error' if not self._alive()
                      else 'login_required' if desired == 'login' else 'loading_courses' if desired == 'catalog'
-                     else 'scanning' if scanning or desired == 'scan' else 'running' if desired == 'run'
+                     else 'scanning' if scanning or desired in ('scan', 'assessment_scan') else 'running' if desired in ('run', 'assessment_open')
                      else 'pausing' if worker_busy else 'error' if workflow.get('phase') == 'error'
                      else 'paused' if desired == 'paused' else 'idle')
             message = workflow.get('message') or meta.get('worker_status') or '选好课程，即可开始'
@@ -238,6 +243,10 @@ class WebInterface:
                 message = '浏览器守护已停止，点击“恢复连接”重启；选课和历史记录会保留'
             elif desired == 'login':
                 message = workflow.get('message') or '请在独立 Edge 窗口登录，完成后会自动继续'
+            elif desired == 'assessment_scan':
+                message = '正在读取作业、测验和考试清单'
+            elif desired == 'assessment_open':
+                message = '正在打开已确认的任务'
             elif desired in ('idle', 'paused') and scan_status in ('failed', 'partial'):
                 message = scan.get('message') or '部分课程未扫描成功，请查看异常后重试'
             elif desired in ('idle', 'paused') and not selected:
@@ -300,7 +309,8 @@ class WebInterface:
             public_logs = [{'time': time.strftime('%m-%d %H:%M:%S', time.localtime(e['time'])),
                 'level': _text(e.get('status'), 100), 'course': _text(e.get('course'), 160),
                 'task': _text(e.get('task'), 240), 'message': _text(e.get('reason'))} for e in events]
-            busy = self.switching or self.closing or worker_busy or desired in ACTIVE or typing['phase'] in TYPING_ACTIVE or typing['pending']
+            busy = (self.switching or self.closing or worker_busy or desired in ACTIVE
+                    or typing['phase'] in TYPING_ACTIVE or typing['pending'] or self.assessment.owns_browser)
             login_status, login_message = 'idle', '点击登录后打开 Edge，已有登录状态会自动复用'
             if self._login_gate:
                 if self._login_error or (self.watchdog and not self._alive()):
@@ -314,7 +324,11 @@ class WebInterface:
                 phase, message = 'awaiting_login', login_message
             selection_locked = (self.switching or self.closing or login_status == 'connecting') if self._login_gate else busy
             return {'version': self.version, 'demo': self.demo,
+                'development': not getattr(sys, 'frozen', False) and not self.demo,
                 'browser': self._browser_view(desired, worker_busy, typing, meta.get('browser_media', {})),
+                'assessment': self.assessment.snapshot(meta.get('assessment_inventory') or {}, account_id, desired,
+                    bool(self.embedded_browser and self.watchdog and self._alive() and not self._login_gate and not self.switching and not self.closing),
+                    meta.get('assessment_entry')),
                 'update': dict(self.updater.snapshot(), can_install=not busy and not self.demo),
                 'window': (self.window_frame.snapshot() if self.window_frame
                            else {'maximized': False, 'native_controls': False}),
@@ -469,6 +483,8 @@ class WebInterface:
             return self._begin_switch(self.active_site, recover=True, connect=True)
         if self._login_gate and name not in ('primary', 'switch_site', 'recover', 'open_logs', 'open_browser', 'none'):
             raise ValueError('请先点击登录并在 Edge 中完成登录')
+        if name.startswith('assessment_'):
+            return self.assessment.action(name, payload)
         if name.startswith('typing_'):
             return self._typing_action(name, payload)
         if name == 'primary':
@@ -601,7 +617,7 @@ class WebInterface:
         view = self._typing_view(state, desired, worker_busy)
         if not view['available']:
             raise ValueError('受管理的 Edge 尚未连接，请先连接课程或恢复浏览器')
-        if name not in ('typing_stop', 'typing_cancel') and (desired in ACTIVE or worker_busy):
+        if name not in ('typing_stop', 'typing_cancel') and (desired in ACTIVE or worker_busy or self.assessment.owns_browser):
             raise ValueError('请先暂停学习，并等待当前扫描或任务停止后再使用手动打字')
         if view['pending'] and name not in ('typing_pause', 'typing_stop', 'typing_cancel'):
             raise ValueError('正在处理上一条打字操作，请稍候')
@@ -681,6 +697,7 @@ class WebInterface:
         if url == self.active_site and self._alive() and not recover:
             return self._notify('当前已经是这个站点')
         self.switching = True
+        self.assessment.reset(clear_chat=True)
         if self._deferred_login:
             self._login_gate = True
             self._login_error = ''
@@ -808,6 +825,8 @@ class WebInterface:
             if self.closing or self.closed:
                 return
             self.closing = True
+            self.assessment.reset(clear_chat=True)
+            self.assessment.key = ''
             self.updater.cancel()
             thread = threading.Thread(target=self._finish_close, daemon=True, name='RainClassroomClose')
             thread.start()
