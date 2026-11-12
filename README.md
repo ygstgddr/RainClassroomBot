@@ -2,9 +2,9 @@
 
 基于 **Python + Playwright + Microsoft Edge + pywebview / WebView2** 的 Windows 桌面任务管理工具。按开课时间选择课程，扫描未完成任务，通过网页正常操作处理已适配的视频、图文和 PPT，并复查服务器完成记录。
 
-当前版本 **0.8.8**。需要 Windows 10/11 x64、Microsoft Edge 和 Microsoft Edge WebView2 Runtime。
+当前版本 **0.8.9**。需要 Windows 10/11 x64、Microsoft Edge 和 Microsoft Edge WebView2 Runtime。
 
-启动先显示玻璃登录页，点击“登录”后在软件内打开学习浏览器，确认账号后自动进入课程页。内置浏览器默认静音。安装时运行发布页中的 `RainClassroomBot-0.8.8-Windows-x64-Setup.exe`，按提示选择目录即可，无需 Python 或管理员权限。
+启动先显示玻璃登录页，点击“登录”后在软件内打开学习浏览器，确认账号后自动进入课程页。内置浏览器默认静音。安装时运行发布页中的 `RainClassroomBot-0.8.9-Windows-x64-Setup.exe`，按提示选择目录即可，无需 Python 或管理员权限。
 
 **旧版用户：**先正常退出助手，安装时选择原 `RainClassroomBot.exe` 所在文件夹，可继续使用原登录和任务数据。装到不同目录不会自动迁移账号。升级不覆盖已有配置，卸载也保留配置、登录与任务记录。详细说明见 [安装与升级](docs/INSTALLER.md)。
 
@@ -60,27 +60,35 @@
 | 减少重复工作 | 复用同一轮课程详情、去除相同状态的重复数据库提交；服务器查询与页面采样分开调度，慢网络时仍及时响应暂停 |
 | 日志管理 | 桌面最近日志、扫描异常列表以及本地日志文件 |
 
-常规学习队列自动处理已适配且具有可靠进度数据的视频、图文和纯 PPT/课件。签到、讨论以及含答题或音视频页的课件由使用者处理。作业和测验可在独立的实验性控制台按任务授权处理，交卷由使用者操作。学习进度以服务器记录为准。
+常规学习队列自动处理已适配且具有可靠进度数据的视频、图文和纯 PPT/课件。签到、讨论以及含答题或音视频页的课件由使用者处理。作业和测验可在实验性控制台按任务授权执行，完整复核、填写通过后自动交卷并等待网页回执。学习进度以服务器记录为准。
 
 最高倍速来自播放器实际提供的菜单，不固定假设为 2 倍。速率重置或视频更换时重新检测。没有可用菜单时保持网站原速。
 
 ## 安装 Windows 版本
 
 1. 安装 Microsoft Edge，并确认已安装 **Microsoft Edge WebView2 Runtime**。若缺少运行时，从 [Microsoft 官方下载页](https://developer.microsoft.com/en-us/microsoft-edge/webview2/consumer/)安装 Evergreen WebView2 Runtime 后再打开助手。
-2. 打开 [Releases](https://github.com/ygstgddr/RainClassroomBot/releases/latest)，下载 `RainClassroomBot-0.8.8-Windows-x64-Setup.exe`。
+2. 打开 [Releases](https://github.com/ygstgddr/RainClassroomBot/releases/latest)，下载 `RainClassroomBot-0.8.9-Windows-x64-Setup.exe`。
 3. 双击安装包。已有版本请选择原安装目录。安装后从开始菜单启动雨课堂助手。
 
-发布页提供 `SHA256SUMS-0.8.8.txt`。可在 PowerShell 中计算下载包的校验值并比对。
+发布页提供 `SHA256SUMS-0.8.9.txt`。可在 PowerShell 中计算下载包的校验值并比对。
 
 ```powershell
-Get-FileHash .\RainClassroomBot-0.8.8-Windows-x64-Setup.exe -Algorithm SHA256
+Get-FileHash .\RainClassroomBot-0.8.9-Windows-x64-Setup.exe -Algorithm SHA256
 ```
 
 ## 自动答题（实验性）
 
 1. 登录后进入「浏览器」，点击工具栏的「自动答题（实验性）」。首次使用需要填写 DeepSeek API Key，保存后由 Windows DPAPI 加密存放在本机。
-2. 在「作业和测验」里点击「扫描任务」，再选择需要处理的一项并点击「交给 Agent」。此操作可能启动任务计时。已打开题页时也可使用「填写当前题页」。
-3. 网页中的可读题干、选项和共享材料会发送到 DeepSeek。两轮复核一致的答案才会写入。交卷前请逐题核对页面和控制台的「填写回执」。
+2. 在「任务待办」里点击「扫描任务」，再选择一项点击「交给 Agent」。此操作授权本次任务的开始计时、复核填写与提交；已打开题页时可点击「完整执行当前题页」。普通聊天和「读网页」仍只读取，不会自动交卷。
+3. 可读题干、选项和共享材料会发送到 DeepSeek。两轮复核一致后填写，再重新检查页面上的全部答案，点击提交并处理明确的确认弹窗。回执区区分已填写、已确认提交、未提交和提交结果待确认。两轮一致不代表保证答案正确。
+4. 当前适配单页可读的单选、多选及短文本。缺图、乱码、未适配控件或未完整读取的分页任务会停下；提交后跳转或超时无明确回执时不会重复交卷，请重新扫描确认。
+5. 回复可以直接选中复制，也可点击「复制回复」。推理强度使用快速、低、高、最大四档滑杆，支持方向键、Home/End 和 Esc；档位对应模型已有参数，不额外增加虚构档位。
+
+Agent 通过现有 Playwright/CDP 连接操控同一个 WebView2，不另启一套浏览器，也不安装外部插件服务。内置工具包括网页观察、带引用的点击、滚动、题目读取与分组、复核填写、争议裁决及核对提交。普通聊天只有读取工具；点击完整执行或交给 Agent 后，才授予本次任务的操作权限。
+
+工具会报告控件遮挡、页面跳转、写入结果和网站回执。页面内展开/收起保留题目上下文，跳转到同一考试的 start/exam 路由后重新读取，cover 成绩页可识别已交卷标识与得分；失败可在本轮内最多修复填写三次。同一题页的复核结论会缓存，不能靠重试消除争议。两轮复核不一致时，Agent 可以引用原文，交给 DeepSeek V4 Pro 额外裁决（可能产生额外 API 用量）。有无法解决的问题时 Agent 可以主动暂停，自动收尾不会覆盖这个决定。
+
+开发版实测范围：真实站点的一份 5 题单选阅读练习已完成填写和提交，网站得分 3/5、未作答 0 题。自动操作已得到真实验证，答案正确率仍需提升；真实填空题、跨页题组及其他复杂布局尚未完成验收。
 
 ## 使用教程：选课程，再点开始
 

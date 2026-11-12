@@ -19,6 +19,8 @@
   const fingerprints = { courses: '', tasks: '', activity: '', history: '', assessment: '', chat: '' };
   let assessmentTab = 'chat', assessmentKeySettings = false;
   let assessmentFeedback = '';
+  const assessmentEfforts = ['none', 'low', 'high', 'max'];
+  const assessmentEffortLabels = ['快速', '低', '高', '最大'];
   let pollTimer = null, pollRunning = false, snapshotPromise = null, pollGeneration = 0, toastTimer = null, errorsInRow = 0, filtersInitialized = false;
   let browserRect, browserLayoutFrame = 0, browserLayoutCall = Promise.resolve();
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -107,6 +109,7 @@
     button.hidden = loginGate() || !s?.browser?.enabled || !s.assessment;
     if (button.hidden) {
       panel.hidden = true;
+      setAssessmentEffortOpen(false);
       button.setAttribute('aria-expanded', 'false');
       $('assessment-key').value = '';
       return;
@@ -135,13 +138,14 @@
       item.classList.toggle('is-active', active);
       item.setAttribute('aria-pressed', String(active));
     });
-    $('assessment-model').disabled = $('assessment-effort').disabled = busy;
+    $('assessment-model').disabled = $('assessment-model-toggle').disabled = $('assessment-effort').disabled = $('assessment-effort-toggle').disabled = busy;
+    if (busy || keyOpen || panel.hidden) { setAssessmentEffortOpen(false); setAssessmentModelOpen(false); }
     $('assessment-web').disabled = busy || $('assessment-model').value !== 'deepseek-v4-pro';
     $('assessment-cancel').hidden = !scanning && !opening && !a.operation;
     $('assessment-cancel').disabled = ui.pending;
     $('assessment-scan').disabled = browserBusy || !a.has_key;
     $('assessment-review').disabled = browserBusy || !a.has_key || s.browser.phase !== 'ready';
-    $('assessment-read-started').hidden = a.entry?.phase !== 'awaiting_start' || Boolean(a.operation);
+    $('assessment-read-started').hidden = !chatting;
     $('assessment-read-started').disabled = $('assessment-review').disabled;
     $('assessment-read-page').disabled = browserBusy;
     if (!a.available) $('assessment-read-page').checked = false;
@@ -149,37 +153,61 @@
     $('assessment-clear-chat').disabled = busy || keyOpen || !a.history?.length;
     if (panel.hidden) return;
 
-    const stats = a.stats || {}, tasks = a.tasks || [];
-    const types = stats['按类型'] || {};
-    const progress = scanning ? `扫描课程 ${stats['已扫描课程'] || 0} / ${stats['课程数'] || '…'}` :
-      `作业 ${types.homework || 0} · 测验 ${types.quiz || 0} · 考试 ${types.exam || 0}`;
-    const failures = a.failed?.length ? ` · ${a.failed.length} 门课程读取失败` : '';
-    setText('assessment-progress', a.phase === 'idle' ? '扫描当前账号的课程' : progress + failures);
+    const stats = a.stats || {}, failed = a.failed || [];
+    const tasks = (a.tasks || []).filter(task => task.state !== 'completed');
+    const types = tasks.reduce((counts, task) => counts.set(task.kind, (counts.get(task.kind) || 0) + 1), new Map());
+    const breakdown = [['homework', '作业'], ['quiz', '测验'], ['exam', '考试']]
+      .filter(([kind]) => types.has(kind)).map(([kind, label]) => `${label} ${types.get(kind)}`);
+    const progress = scanning ? `正在扫描 ${stats['已扫描课程'] || 0} / ${stats['课程数'] || '…'} 门课程` :
+      tasks.length ? [`${tasks.length} 项未完成`, ...breakdown].join(' · ') : '';
+    setText('assessment-progress', progress);
+    $('assessment-progress').hidden = !progress;
     const summary = a.operation === 'summary' ? 'DeepSeek 正在汇总…' : a.summary || a.scan_message;
-    $('assessment-summary-details').hidden = !summary;
+    $('assessment-summary-details').hidden = !summary && !failed.length;
+    setText('assessment-summary-title', failed.length ? `扫描详情 · ${failed.length} 门课程读取失败` : '扫描详情');
     setText('assessment-summary', summary);
+    $('assessment-summary').hidden = !summary;
+    $('assessment-failed-courses').hidden = !failed.length;
     $('assessment-task-count').hidden = !tasks.length;
     setText('assessment-task-count', tasks.length);
     setText('assessment-message', assessmentFeedback || a.message ||
       (a.operation === 'agent' && chatting ? '' : a.entry?.message || ''));
 
-    const hash = fingerprint([tasks, a.failed, browserBusy]);
+    $('assessment-tasks').hidden = !tasks.length;
+    $('assessment-task-empty').hidden = Boolean(tasks.length);
+    if (!tasks.length) {
+      const empty = scanning ? ['正在扫描课程', '发现未完成的任务后会显示在这里。', 'refresh'] :
+        a.phase === 'done' && !failed.length ? ['没有待办任务', '当前已扫描的课程中没有未完成任务。', 'check'] :
+        failed.length || a.phase === 'error' ? ['暂未找到待办任务', '可查看扫描详情，或重新扫描课程。', 'list'] :
+        a.phase === 'cancelled' ? ['扫描已停止', '再次扫描以查找未完成的任务。', 'list'] :
+        ['还没有扫描任务', '点击「扫描任务」查看当前账号的待办。', 'list'];
+      setText('assessment-empty-title', empty[0]);
+      setText('assessment-empty-note', empty[1]);
+      $('assessment-empty-icon').setAttribute('href', '#i-' + empty[2]);
+    }
+
+    const hash = fingerprint([tasks, failed, browserBusy]);
     if (fingerprints.assessment !== hash) {
       fingerprints.assessment = hash;
-      $('assessment-inventory').hidden = !tasks.length && !a.failed?.length;
-      $('assessment-task-empty').hidden = !$('assessment-inventory').hidden;
+      $('assessment-failed-courses').replaceChildren(...failed.map(name => make('li', '', name)));
       const list = document.createDocumentFragment();
       const occurrences = new Map();
       const taskName = t => JSON.stringify([t.course, t.title]);
       tasks.forEach(t => occurrences.set(taskName(t), (occurrences.get(taskName(t)) || 0) + 1));
       tasks.forEach(t => {
         const item = make('li', 'assessment-task');
+        const mark = make('span', 'assessment-mark');
+        mark.append(icon(t.state === 'locked' ? 'clock' : 'file'));
         const copy = make('div');
         const classroom = occurrences.get(taskName(t)) > 1 ? ` · 班级 ${asText(t.id).split(':')[0]}` : '';
-        copy.append(make('strong', '', t.title),
-          make('p', '', `${t.course}${classroom} · ${typeNames[t.kind] || t.kind} · ${({ completed: '已完成', locked: '未开放', manual: '可核对', unknown: '进度未知' })[t.state] || t.state}`));
-        item.append(copy);
-        if (!['completed', 'locked'].includes(t.state)) {
+        const state = ({ locked: '未开放', manual: '可核对', unknown: '进度未知' })[t.state] || t.state;
+        const status = make('span', 'assessment-task-status', state);
+        if (t.state === 'manual') status.classList.add('is-manual');
+        const meta = make('p', 'assessment-task-meta');
+        meta.append(make('span', '', `${t.course}${classroom} · ${typeNames[t.kind] || t.kind}`), status);
+        copy.append(make('strong', '', t.title), meta);
+        item.append(mark, copy);
+        if (t.state !== 'locked') {
           const open = actionButton('交给 Agent', 'assessment_select_task');
           open.title = '自动进入此任务，可能立即开始计时';
           open.dataset.id = t.id;
@@ -188,7 +216,6 @@
         }
         list.append(item);
       });
-      (a.failed || []).forEach(name => list.append(make('li', '', `${name} · 读取失败`)));
       $('assessment-tasks').replaceChildren(list);
     }
     renderAssessmentChat(a.history || [], a.operation === 'agent' ? (a.steps || []).at(-1) || '正在请求模型' : '', a.fill_receipt);
@@ -199,6 +226,11 @@
     const card = make('div', 'assessment-receipt');
     card.append(make('strong', '', result.filled ? `填写回执 · 已写入 ${result.filled.length} 题` : '填写回执 · 未能写入'));
     if (result.error) card.append(make('p', '', result.error));
+    if (result.submission) {
+      const state = result.submission.state;
+      const label = state === 'submitted' ? '已确认提交' : state === 'blocked' ? '未提交' : '提交结果待确认';
+      card.append(make('p', 'assessment-submission', `${label} · ${result.submission.message || ''}`));
+    }
     const notes = make('ul');
     Object.entries(result.review_notes || {}).forEach(([id, reason]) => {
       notes.append(make('li', '', `第 ${id} 题 · 未通过复核 · ${reason}`));
@@ -211,6 +243,57 @@
     }
     if (notes.childElementCount) card.append(notes);
     return card;
+  }
+
+  function formatAssessmentResponse(text) {
+    const response = make('div', 'assessment-response');
+    const appendInline = (node, line) => {
+      line.split(/(\*\*[^*\n]+\*\*)/).forEach((part, index) => {
+        node.append(index % 2 ? make('strong', '', part.slice(2, -2)) : part);
+      });
+    };
+    let block;
+    for (const line of asText(text).split(/\r?\n/)) {
+      if (block?.localName === 'pre') {
+        block.append('\n' + line);
+        if (/^\s*```\s*$/.test(line)) block = null;
+        continue;
+      }
+      if (/^\s*```/.test(line)) {
+        block = make('pre', '', line);
+        response.append(block);
+        continue;
+      }
+      if (!line.trim()) {
+        block = null;
+        continue;
+      }
+      const heading = line.match(/^#{1,6}[ \t]+(.+)$/);
+      if (heading) {
+        const title = make('h4');
+        appendInline(title, heading[1]);
+        response.append(title);
+        block = null;
+        continue;
+      }
+      const item = line.match(/^(?:[-*+]|(\d{1,9})\.)[ \t]+(.+)$/);
+      const tag = item ? (item[1] ? 'ol' : 'ul') : 'p';
+      if (block?.localName !== tag) {
+        block = make(tag);
+        if (tag === 'ol') block.start = Number(item[1]);
+        response.append(block);
+      } else if (!item) {
+        block.append('\n');
+      }
+      if (item) {
+        const row = make('li');
+        appendInline(row, item[2]);
+        block.append(row);
+      } else {
+        appendInline(block, line);
+      }
+    }
+    return response;
   }
 
   function renderAssessmentChat(history, liveStep, receipt) {
@@ -226,8 +309,8 @@
       const mark = make('span', 'assessment-mark');
       mark.append(icon('sparkles'));
       welcome.append(mark, make('h4', '', '想聊点什么？'),
-        make('p', '', '问 DeepSeek 一个问题，或让 Agent 处理你选中的课程任务。'),
-        actionButton('查看作业和测验', 'assessment_tab_tasks', 'list'));
+        make('p', '', '在这里与 DeepSeek 聊天。需要填写、核对并提交时，可从待办任务启动自动执行。'),
+        actionButton('查看任务待办', 'assessment_tab_tasks', 'list'));
       messages.append(welcome);
     }
     history.forEach((item, index) => {
@@ -236,7 +319,9 @@
       entry.setAttribute('aria-label', user ? '你' : 'DeepSeek');
       if (!user) {
         const label = make('div', 'assessment-assistant-label');
-        label.append(icon('sparkles'), make('span', '', 'DeepSeek'));
+        const mark = make('span', 'assessment-assistant-mark');
+        mark.append(icon('sparkles'));
+        label.append(mark, make('span', '', 'DeepSeek'));
         entry.append(label);
       }
       if (item.reasoning || item.steps?.length) {
@@ -252,7 +337,7 @@
         if (item.reasoning) details.append(make('p', 'assessment-chat-text', item.reasoning));
         entry.append(details);
       }
-      entry.append(make('p', 'assessment-chat-text', item.text));
+      entry.append(user ? make('p', 'assessment-chat-text', item.text) : formatAssessmentResponse(item.text));
       const sources = make('div', 'assessment-sources');
       (item.sources || []).forEach(source => {
         const link = make('a', 'assessment-source', source.title || source.url);
@@ -266,6 +351,12 @@
       if (sources.childElementCount) entry.append(sources);
       const toolResult = assessmentReceipt(item.receipt);
       if (toolResult) entry.append(toolResult);
+      if (!user && item.text) {
+        const copy = make('button', 'assessment-copy', '复制回复');
+        copy.type = 'button';
+        copy.addEventListener('click', () => copyAssessmentReply(item.text));
+        entry.append(copy);
+      }
       messages.append(entry);
     });
     const toolResult = assessmentReceipt(receipt);
@@ -275,9 +366,58 @@
     log.scrollTop = nearBottom || history.at(-1)?.role === 'user' ? log.scrollHeight : top;
   }
 
+  async function copyAssessmentReply(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const field = make('textarea', 'assessment-copy-buffer');
+      field.value = text;
+      field.readOnly = true;
+      const focused = document.activeElement;
+      document.body.append(field);
+      let copied = false;
+      try {
+        field.select();
+        copied = document.execCommand('copy');
+      } catch {
+        copied = false;
+      } finally {
+        field.remove();
+        focused?.focus({ preventScroll: true });
+      }
+      if (!copied) {
+        showToast('复制未成功，可选中回复正文手动复制。', true);
+        return;
+      }
+    }
+    showToast('已复制回复。');
+  }
+
+  function setAssessmentEffortOpen(open, restoreFocus = false) {
+    const toggle = $('assessment-effort-toggle');
+    const popover = $('assessment-effort-popover');
+    if (popover.hidden === !open) return;
+    popover.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+    if (open) { setAssessmentModelOpen(false); $('assessment-effort').focus(); }
+    if (restoreFocus) toggle.focus();
+  }
+
+  function setAssessmentModelOpen(open, restoreFocus = false) {
+    const toggle = $('assessment-model-toggle');
+    if (open && toggle.disabled) return;
+    $('assessment-model-menu').hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+    if (open) {
+      setAssessmentEffortOpen(false);
+      $('assessment-model-menu').querySelector('[aria-checked=true]').focus();
+    }
+    if (restoreFocus) toggle.focus();
+  }
+
   function assessmentOptions() {
     const model = $('assessment-model').value;
-    return { model, effort: $('assessment-effort').value, web_search: model === 'deepseek-v4-pro' && $('assessment-web').checked };
+    return { model, effort: assessmentEfforts[$('assessment-effort').valueAsNumber], web_search: model === 'deepseek-v4-pro' && $('assessment-web').checked };
   }
 
   function syncBrowserLayout() {
@@ -880,9 +1020,13 @@
   async function handleAction(action, target) {
     if (action === 'assessment_toggle') {
       const panel = $('assessment-panel');
+      const launch = $('browser-assessment-tools');
       panel.hidden = !panel.hidden;
-      $('browser-assessment-tools').setAttribute('aria-expanded', String(!panel.hidden));
-      if (panel.hidden) $('assessment-key').value = '';
+      launch.setAttribute('aria-expanded', String(!panel.hidden));
+      if (panel.hidden) {
+        $('assessment-key').value = '';
+        launch.focus();
+      }
       renderAssessment();
       requestBrowserLayout();
       if (!panel.hidden) await sendAction('assessment_console');
@@ -992,9 +1136,68 @@
       $('assessment-chat-form').requestSubmit();
     }
   });
-  $('assessment-model').addEventListener('change', () => {
+  const modelControl = $('assessment-model-control');
+  const modelItems = [...modelControl.querySelectorAll('[data-assessment-model]')];
+  $('assessment-model-toggle').addEventListener('click', () => {
+    setAssessmentModelOpen($('assessment-model-menu').hidden);
+  });
+  modelItems.forEach(item => item.addEventListener('click', () => {
+    if ($('assessment-model-toggle').disabled) return;
+    $('assessment-model').value = item.dataset.assessmentModel;
+    const label = item.querySelector('strong').textContent;
+    setText('assessment-model-current', label);
+    $('assessment-model-toggle').setAttribute('aria-label', '选择模型：' + label);
+    modelItems.forEach(option => option.setAttribute('aria-checked', String(option === item)));
     if ($('assessment-model').value !== 'deepseek-v4-pro') $('assessment-web').checked = false;
+    setAssessmentModelOpen(false, true);
     renderAssessment();
+  }));
+  modelControl.addEventListener('keydown', event => {
+    const open = !$('assessment-model-menu').hidden;
+    if (event.key === 'Escape' && open) {
+      event.preventDefault(); event.stopPropagation(); setAssessmentModelOpen(false, true);
+    } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault();
+      if (!open) { setAssessmentModelOpen(true); return; }
+      const index = modelItems.indexOf(document.activeElement);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? modelItems.length - 1 :
+        (index + (event.key === 'ArrowDown' ? 1 : -1) + modelItems.length) % modelItems.length;
+      modelItems[next].focus();
+    } else if (event.key === 'Tab' && open) {
+      setAssessmentModelOpen(false, true);
+    }
+  });
+  modelControl.addEventListener('focusout', event => {
+    if (!modelControl.contains(event.relatedTarget)) setAssessmentModelOpen(false);
+  });
+  document.addEventListener('pointerdown', event => {
+    if (!modelControl.contains(event.target)) setAssessmentModelOpen(false);
+  });
+  const effortControl = $('assessment-effort-control');
+  $('assessment-effort-toggle').addEventListener('click', () => {
+    setAssessmentEffortOpen($('assessment-effort-popover').hidden);
+  });
+  $('assessment-effort').addEventListener('input', event => {
+    const label = assessmentEffortLabels[event.target.valueAsNumber];
+    setText('assessment-effort-current', label);
+    setText('assessment-effort-name', label);
+    setText('assessment-effort-note', ['快速回应，适合简单对话', '轻量分析，兼顾响应速度', '复杂问题，深入核对', '投入更多推理，响应可能更慢'][event.target.valueAsNumber]);
+    $('assessment-effort-popover').style.setProperty('--effort-fill', `${event.target.valueAsNumber / 3 * 100}%`);
+    $('assessment-effort-popover').classList.toggle('is-max', event.target.valueAsNumber === 3);
+    event.target.setAttribute('aria-valuetext', label);
+    $('assessment-effort-toggle').setAttribute('aria-label', '推理强度：' + label);
+  });
+  effortControl.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || $('assessment-effort-popover').hidden) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setAssessmentEffortOpen(false, true);
+  });
+  effortControl.addEventListener('focusout', event => {
+    if (!effortControl.contains(event.relatedTarget)) setAssessmentEffortOpen(false);
+  });
+  document.addEventListener('pointerdown', event => {
+    if (!effortControl.contains(event.target)) setAssessmentEffortOpen(false);
   });
   document.querySelectorAll('[data-browser-command]').forEach(button => button.addEventListener('click', () => {
     if (!button.disabled) sendAction('browser_command', { command: button.dataset.browserCommand });

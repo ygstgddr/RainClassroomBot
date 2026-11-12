@@ -20,8 +20,8 @@ _TIMEOUT_SECONDS = 120
 _MAX_REQUEST_BYTES = 600_000
 _MAX_RESPONSE_BYTES = 1_000_000
 _MAX_OUTPUT_TOKENS = 12_000
-_MAX_ROUNDS = 8
-_MAX_CALLS = 24
+_MAX_ROUNDS = 24
+_MAX_CALLS = 48
 _MAX_ARGUMENT_BYTES = 32_000
 _MAX_TOOL_OUTPUT_BYTES = 160_000
 _MAX_SOURCES = 24
@@ -139,6 +139,7 @@ def run_agent(
     tools: list[dict[str, Any]],
     execute: Callable[[str, dict[str, Any]], dict[str, Any]],
     cancelled: Callable[[], bool],
+    completion_hint: Callable[[], str | None] | None = None,
 ) -> dict[str, Any]:
     """Run approved local tools and return final text, provider reasoning and sources."""
     _check_cancelled(cancelled)
@@ -164,6 +165,7 @@ def run_agent(
     seen_calls: set[str] = set()
     reasoning: list[str] = []
     sources: dict[str, dict[str, str]] = {}
+    corrected_early_finish = False
     for turn in range(_MAX_ROUNDS):
         _check_cancelled(cancelled)
         output = _request_response(key, payload)
@@ -212,6 +214,11 @@ def run_agent(
                     _collect_sources(action.get("sources"), sources)
 
         if not pending:
+            hint = completion_hint() if completion_hint else None
+            if hint and not corrected_early_finish and turn < _MAX_ROUNDS - 1:
+                corrected_early_finish = True
+                history.append({'role': 'user', 'content': hint})
+                continue
             final_text = "\n".join(text).strip()
             if not final_text:
                 raise AssessmentModelError("DeepSeek 未返回测验代理的最终答复。")

@@ -246,10 +246,24 @@ _DOM_SCRIPT = r"""
     return {error: '题页内容或答题控件已变化，请重新读取。'};
   }
   if (request.mode === 'verify') {
+    if (request.complete) {
+      const bound = new Set(current.rows.flatMap(row => row.controls));
+      const omitted = docs.some(doc => answerControls(doc.body).some(el => !bound.has(el) &&
+        !el.matches('input[type=search]') && !el.closest('[role=search], [role=dialog], dialog, .el-message-box, .el-dialog')));
+      const hidden = docs.some(doc => [...doc.querySelectorAll(questionsSelector)].some(el =>
+        !visible(el) && el.querySelector(formSelector)));
+      if (omitted || hidden || actual.truncated || actual.unreadableFrames) {
+        return {error: '页面还有未纳入读取范围的答题控件或隐藏题目，不能提交。'};
+      }
+    }
     const filled = current.rows.filter(row => {
-      const chosen = row.examRadios?.filter(vm => vm.model === vm.label);
-      const option = row.question.options.findIndex(item => item.id === request.answers[row.question.id]);
-      return option >= 0 && chosen?.length === 1 && chosen[0] === row.examRadios[option];
+      const answer = request.answers[row.question.id];
+      if (row.question.issues.length || !Object.hasOwn(request.answers, row.question.id)) return false;
+      if (row.question.kind === 'text') return row.controls.length === 1 && row.controls[0].value === answer;
+      const selected = row.examRadios ? row.examRadios.map(vm => vm.model === vm.label) : row.controls.map(el => el.checked);
+      const choices = Array.isArray(answer) ? answer : [answer];
+      return choices.length > 0 && choices.every(id => row.question.options.some(option => option.id === id)) &&
+        row.controls.every((el, i) => !el.indeterminate && selected[i] === choices.includes(row.question.options[i].id));
     }).map(row => row.question.id);
     return {filled};
   }
@@ -383,8 +397,8 @@ def fill_script(origin, registry, proposals, expected, answers):
     return _script(origin, registry, 'fill', proposals=proposals, expected=expected, answers=answers, deadline=deadline)
 
 
-def verify_fill_script(origin, registry, proposals, expected, answers):
-    return _script(origin, registry, 'verify', proposals=proposals, expected=expected, answers=answers)
+def verify_fill_script(origin, registry, proposals, expected, answers, *, complete=False):
+    return _script(origin, registry, 'verify', proposals=proposals, expected=expected, answers=answers, complete=complete)
 
 
 def adapt_groups(surface, groups):

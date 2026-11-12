@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import socket
 import threading
+import time
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
@@ -307,6 +308,19 @@ class EmbeddedBrowser:
             self._assessment_surface = deepcopy(surface)
             return surface
 
+    def agent_session(self, cancelled):
+        """Attach browser tools to this exact WebView2 without launching Edge."""
+        from browser.agent_browser import connect_agent_browser
+        source = ''
+        def current():
+            nonlocal source
+            if self.control and self.control.CoreWebView2:
+                source = str(self.control.CoreWebView2.Source)
+        self.invoke(current)
+        if not source or self.folder not in self.ports:
+            raise ValueError('内置浏览器尚未连接。')
+        return connect_agent_browser(f'http://127.0.0.1:{self.ports[self.folder]}', source, self.home, cancelled)
+
     def read_assessment_page(self, surface=None, groups=None):
         """Read standard questions or adopt groups of observed native controls."""
         from browser.assessment_page import adapt_groups, normalize_capture, question_script
@@ -381,6 +395,37 @@ class EmbeddedBrowser:
                 for question_id in set(pending) - set(verified['filled']):
                     errors[question_id] = '页面未确认选中，请核对这道题。'
             return {'filled': filled, 'errors': errors}
+
+    def submit_assessment_answers(self, capture, answers, *, cancelled=None):
+        """Check every reviewed answer and submit once, including the site dialog.
+
+        A click is not completion. Missing receipts or navigation return unknown;
+        they must never trigger a second click or mark the task completed.
+        """
+        from browser.assessment_submit import submission_script
+
+        with self._assessment_lock:
+            expected, proposals = self._revalidate_assessment(capture)
+            ids = {row['id'] for row in capture[0]}
+            if (not ids or set(answers) != ids or capture[1]
+                    or any(row['issues'] for row in capture[0])):
+                return {'state': 'blocked', 'message': '题目尚未完整读取、复核和填写，已停止提交。'}
+            deadline = time.monotonic() + 15
+            begin = True
+            while time.monotonic() < deadline:
+                if cancelled and cancelled():
+                    return {'state': 'unknown', 'message': '操作已停止，请核对网站的提交状态。'}
+                try:
+                    result, _ = self._assessment_run(lambda origin, registry: submission_script(
+                        origin, registry, proposals, expected, answers, begin=begin),
+                        capture[2], writing=True, cancelled=cancelled)
+                except ValueError as exc:
+                    return {'state': 'unknown', 'message': f'未获得可靠提交回执：{exc}'}
+                if result.get('state') != 'waiting':
+                    return result
+                begin = False
+                time.sleep(.25)
+            return {'state': 'unknown', 'message': '网站尚未确认提交结果；不会重复提交，请稍后重新扫描。'}
 
     def command(self, name, url=None):
         def apply():

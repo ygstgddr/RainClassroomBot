@@ -100,10 +100,10 @@ class AssessmentPanel:
             self.entry_id = None
             if self.key and self.entry_options and browser.document_digest() == current_entry['document']:
                 self._agent('检查并填写当前已授权的作业或测验题页。先读取题目，必要时观察并建立题目分组。'
-                            '把共享阅读材料和题干结合起来，只填写可核验的答案。交卷由使用者操作。',
+                            '把共享阅读材料和题干结合起来，复核并填写；全部通过后自行检查、确认并提交，等待网站回执。',
                             self.entry_options, fill=True, read=True)
             else:
-                self.message = '打开后网页发生变化，请核对页面，再点「填写当前题页」。'
+                self.message = '打开后网页发生变化，请核对页面，再点「完整执行当前题页」。'
 
         phase = report.get('phase', 'idle')
         if phase in ('queued', 'running') and desired != 'assessment_scan':
@@ -161,11 +161,26 @@ class AssessmentPanel:
 
         def run():
             if read:
-                browser_tools = BrowserAgentTools(owner.embedded_browser, key, fill=fill, cancelled=cancelled,
-                                                  on_event=event, on_receipt=receipt)
-                return run_agent(key, messages, **options, tools=browser_tools.specs(), execute=browser_tools.execute,
-                                 cancelled=browser_tools.stopped)
+                with owner.embedded_browser.agent_session(cancelled) as browser:
+                    return execute_browser(browser)
             return run_agent(key, messages, **options, tools=[], execute=lambda *_: {}, cancelled=cancelled)
+
+        def execute_browser(browser):
+            browser_tools = BrowserAgentTools(browser, key, fill=fill, cancelled=cancelled,
+                                              on_event=event, on_receipt=receipt)
+            result = run_agent(key, messages, **options, tools=browser_tools.specs(), execute=browser_tools.execute,
+                               cancelled=browser_tools.stopped, completion_hint=browser_tools.completion_hint)
+            if fill and not browser_tools.stopped():
+                final = browser_tools.finish()
+                receipt(final)
+                submitted = final.get('submission', {})
+                status = ((submitted.get('message') or '网站已确认提交成功。') if submitted.get('state') == 'submitted'
+                          else submitted.get('message') or final.get('error') or '尚未提交：仍有题目需要处理。')
+                # Execution status is produced by the controller, not model claims.
+                result['text'] = f"{status}\n\n实际写入 {len(final.get('filled', []))} 题。" + (
+                    '\n存在未通过复核或未能写入的题目，请查看执行回执。'
+                    if final.get('withheld') or final.get('errors') else '')
+            return result
 
         def remember(result):
             self.history = [*self.history, {'role': 'assistant', **result, 'steps': self.steps,
@@ -237,7 +252,7 @@ class AssessmentPanel:
             if set(payload) != {'model', 'effort', 'web_search'}:
                 raise ValueError('填写参数无效。')
             self._agent('观察并填写当前这页已批准的题目。只填写工具复核通过的题目，'
-                        '若需要开始计时或交卷，停下并告知使用者。', self._options(payload), fill=True, read=True)
+                        '全部通过后自行核对、交卷并确认，等待网站提交回执。', self._options(payload), fill=True, read=True)
             return {'ok': True}
         if name == 'assessment_select_task':
             if set(payload) != {'id', 'model', 'effort', 'web_search'} or not self.key:

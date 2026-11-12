@@ -212,8 +212,12 @@ def test_agent_fill_tool_requires_approval_and_reports_partial_review(monkeypatc
     assert set(result['withheld']) == {'2', '4'}
     assert '不一致' in result['review_notes']['2'] and '缺图' in result['review_notes']['4']
     assert receipts == [result]
+    retry = agent.execute('fill_reviewed_answers', proposals)
+    assert set(retry['withheld']) == {'2', '4'}
+    assert retry['filled'] == ['1', '3']
+    assert len(browser.fills) == 2
+    agent.execute('fill_reviewed_answers', proposals)
     assert 'error' in agent.execute('fill_reviewed_answers', proposals)
-    assert browser.fills == [{'1': '1', '3': '2'}]
 
 
 def test_reader_and_answer_panel_in_edge():
@@ -265,8 +269,28 @@ def test_reader_and_answer_panel_in_edge():
                 snapshot['assessment']['has_key'] = True
                 await panel.evaluate('s => RainUI.applySnapshot(s)', snapshot)
                 assert await panel.locator('#assessment-key-form').is_hidden()
+                await panel.locator('#assessment-effort-toggle').click()
+                await panel.locator('#assessment-effort').press('End')
+                assert await panel.locator('#assessment-effort').get_attribute('aria-valuetext') == '最大'
+                await panel.locator('#assessment-effort').press('ArrowLeft')
+                await panel.locator('#assessment-effort').press('Escape')
+                assert await panel.locator('#assessment-effort-popover').is_hidden()
+                assert await panel.locator('#assessment-effort-toggle').evaluate('el => el === document.activeElement')
                 assert await panel.locator('#assessment-web').is_disabled()
-                await panel.locator('#assessment-model').select_option('deepseek-v4-pro')
+                await panel.locator('#assessment-model-toggle').click()
+                await panel.get_by_role('menuitemradio', name='Flash').press('End')
+                await panel.get_by_role('menuitemradio', name='V4 Pro').press('Enter')
+                assert await panel.locator('#assessment-model').input_value() == 'deepseek-v4-pro'
+                assert await panel.locator('#assessment-model-menu').is_hidden()
+                assert await panel.locator('#assessment-model-current').inner_text() == 'V4 Pro'
+                await panel.locator('#assessment-model-toggle').press('ArrowDown')
+                assert await panel.get_by_role('menuitemradio', name='V4 Pro').get_attribute('aria-checked') == 'true'
+                await panel.get_by_role('menuitemradio', name='V4 Pro').press('Escape')
+                assert await panel.locator('#assessment-model-toggle').evaluate('el=>el===document.activeElement')
+                await panel.locator('#assessment-model-toggle').click()
+                await panel.locator('#assessment-effort-toggle').click()
+                assert await panel.locator('#assessment-model-menu').is_hidden()
+                await panel.locator('#assessment-effort').press('Escape')
                 await panel.locator('#assessment-web').check()
                 await panel.locator('#assessment-chat-input').fill('离线样例问题')
                 await panel.locator('#assessment-send').click()
@@ -274,11 +298,31 @@ def test_reader_and_answer_panel_in_edge():
                 assert ('assessment_chat', {'text': '离线样例问题', 'model': 'deepseek-v4-pro',
                     'effort': 'high', 'web_search': True, 'read_page': False}) in actions
                 snapshot['assessment']['history'] = [
-                    {'role': 'assistant', 'text': '长对话样例\n' * 60, 'steps': ['读取题页']}]
+                    {'role': 'user', 'text': '## **保持原样**'},
+                    {'role': 'assistant',
+                     'text': '## **复习要点**\n- **定义**\n- <img src=x onerror="window.BAD_UI=true">\n\n' + '长对话样例\n' * 60,
+                     'steps': ['读取题页']}]
                 receipt = {'filled': ['1'], 'review_notes': {'2': '两轮独立复核的答案不一致。'},
                            'errors': {'3': '页面未确认选中。'}, 'corrected': ['1']}
                 snapshot['assessment']['fill_receipt'] = receipt
                 await panel.evaluate('s => RainUI.applySnapshot(s)', snapshot)
+                assert await panel.locator('.assessment-user').inner_text() == '## **保持原样**'
+                assert await panel.locator('.assessment-response h4 strong').inner_text() == '复习要点'
+                assert await panel.locator('.assessment-response li').count() == 2
+                assert '<img src=x' in await panel.locator('.assessment-response li').last.inner_text()
+                assert not await panel.locator('.assessment-response img').count()
+                assert await panel.locator('.assessment-response').evaluate('el=>getComputedStyle(el).userSelect') == 'text'
+                await panel.evaluate('''() => {
+                    Object.defineProperty(navigator, 'clipboard', {configurable:true,value:{writeText:async text=>{window.copied=text}}});
+                }''')
+                await panel.get_by_role('button', name='复制回复').click()
+                assert await panel.evaluate('window.copied') == snapshot['assessment']['history'][-1]['text']
+                await panel.evaluate('''() => {
+                    navigator.clipboard.writeText=async()=>{throw new Error('unavailable')};
+                    document.execCommand=name=>{window.fallbackCopied=document.activeElement.value;return name==='copy'};
+                }''')
+                await panel.get_by_role('button', name='复制回复').click()
+                assert await panel.evaluate('window.fallbackCopied') == snapshot['assessment']['history'][-1]['text']
                 summary = panel.locator('.assessment-receipt')
                 assert await summary.count() == 1
                 assert '已写入 1 题' in await summary.inner_text()
@@ -289,26 +333,46 @@ def test_reader_and_answer_panel_in_edge():
                 assert await panel.locator('.assessment-message .assessment-receipt').count() == 1
                 for size in ({'width': 1280, 'height': 850}, {'width': 900, 'height': 660}):
                     await panel.set_viewport_size(size)
-                    assert await panel.evaluate('''() => {
+                    await panel.wait_for_function('''() => {
                         const chat = document.querySelector('#assessment-chat');
                         const dock = document.querySelector('#assessment-dock').getBoundingClientRect();
                         const panel = document.querySelector('#assessment-panel').getBoundingClientRect();
+                        const viewport = document.querySelector('#browser-viewport').getBoundingClientRect();
                         return chat.scrollHeight > chat.clientHeight &&
                             chat.getBoundingClientRect().bottom <= dock.top + 1 &&
-                            dock.bottom <= panel.bottom + 1;
+                            dock.bottom <= panel.bottom + 1 && dock.bottom < innerHeight &&
+                            viewport.right < panel.left && viewport.width >= 425 &&
+                            document.documentElement.scrollWidth === innerWidth;
                     }''')
                 await panel.locator('[data-action=assessment_tab_tasks]').click()
+                assert await panel.locator('#assessment-empty-title').inner_text() == '还没有扫描任务'
                 await panel.locator('#assessment-scan').click()
                 await panel.wait_for_function('!RainUI.getState().pending')
                 assert ('assessment_scan', {}) in actions
-                snapshot['assessment'].update(phase='cancelled', tasks=[
-                    {'id': '1:7', 'title': '模拟测验', 'course': '模拟课程', 'kind': 'quiz', 'state': 'manual'}])
+                pending = {'id': '1:7', 'title': '模拟测验', 'course': '模拟课程', 'kind': 'quiz', 'state': 'manual'}
+                complete = dict(pending, id='1:8', title='已提交的作业', kind='homework', state='completed')
+                snapshot['assessment'].update(phase='done', tasks=[pending, complete])
                 await panel.evaluate('s => RainUI.applySnapshot(s)', snapshot)
+                assert await panel.locator('#assessment-task-count').inner_text() == '1'
+                assert await panel.locator('#assessment-progress').inner_text() == '1 项未完成 · 测验 1'
+                assert await panel.locator('#assessment-tasks li').count() == 1
+                assert not await panel.get_by_text('已提交的作业', exact=True).count()
                 await panel.get_by_role('button', name='交给 Agent').click()
                 await panel.wait_for_function('!RainUI.getState().pending')
                 assert ('assessment_select_task', {'id': '1:7', 'model': 'deepseek-v4-pro',
                     'effort': 'high', 'web_search': True}) in actions
                 assert await panel.locator('#assessment-chat-view').is_visible()
+                await panel.locator('[data-action=assessment_tab_tasks]').click()
+                snapshot['assessment']['tasks'] = [complete]
+                await panel.evaluate('s => RainUI.applySnapshot(s)', snapshot)
+                assert await panel.locator('#assessment-task-count').is_hidden()
+                assert not await panel.locator('#assessment-tasks li').count()
+                assert await panel.locator('#assessment-empty-title').inner_text() == '没有待办任务'
+                snapshot['assessment']['failed'] = ['未读取的课程']
+                await panel.evaluate('s => RainUI.applySnapshot(s)', snapshot)
+                assert await panel.locator('#assessment-empty-title').inner_text() == '暂未找到待办任务'
+                await panel.locator('#assessment-summary-title').click()
+                assert await panel.get_by_text('未读取的课程', exact=True).is_visible()
                 assert await panel.evaluate('storageWrites') == 0
                 assert await panel.locator('#browser-viewport').is_visible()
                 assert not errors

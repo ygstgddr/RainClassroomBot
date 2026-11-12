@@ -25,6 +25,6 @@ def assessment_origin(url, site):
         return source
     if (source == EXAM_ORIGIN and home.scheme == 'https' and base
             and (home.hostname == 'yuketang.cn' or home.hostname.endswith('.yuketang.cn'))
-            and re.fullmatch(r'/exam/[0-9]+/?', page.path)):
+            and re.fullmatch(r'/(?:exam|start|cover)/[0-9]+/?', page.path)):
         return source
     return None
