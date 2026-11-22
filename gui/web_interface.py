@@ -19,7 +19,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from core.config import app_root
-from core.courses import course_state, date_text
+from core.courses import course_state, date_text, timestamp, window_reason
 from core.sites import PRESETS, normalize_site, prepare_site, read_sites, save_site, site_config
 from core.task_types import AUTOMATED_KINDS, type_label
 from core.updater import UpdateManager
@@ -208,10 +208,14 @@ class WebInterface:
                 account_id = str(account.get('id') or '')
                 courses = meta.get('course_catalog:' + account_id) or []
                 selected = set(str(cid) for cid in (meta.get('selected_courses:' + account_id) or []))
+                now = time.time()
+                outside = {str(c['classroom_id']) for c in courses if window_reason(c, now=now)}
+                courses = [c for c in courses if str(c['classroom_id']) not in outside]
+                selected -= outside
                 rows = [dict(row) for row in db.execute('SELECT * FROM tasks WHERE account=? AND active=1 '
                         'ORDER BY CASE WHEN deadline>0 THEN deadline ELSE 99999999999 END, '
                         'CASE kind WHEN "article" THEN 0 WHEN "video" THEN 1 ELSE 2 END, course, leaf_id', (account_id,))
-                        if str(row['classroom_id']) in selected]
+                        if str(row['classroom_id']) in selected and not window_reason(None, dict(row), now)]
                 events = [dict(row) for row in db.execute('SELECT * FROM events ORDER BY id DESC LIMIT 80')]
             desired = meta.get('desired', 'idle')
             if self._deferred_login:
@@ -252,7 +256,7 @@ class WebInterface:
             elif desired in ('idle', 'paused') and not selected:
                 message = '请选择需要处理的课程，选择会自动保存'
             elif desired in ('idle', 'paused') and not (meta.get('scanned_account') == account_id
-                    and meta.get('scanned_courses') == sorted(selected)) and phase != 'error':
+                    and set(meta.get('scanned_courses') or []) - outside == selected) and phase != 'error':
                 message = '课程选择已保存，点击开始会自动扫描并处理'
             if self.demo:
                 message = '演示模式 · 虚构数据，可体验选课、筛选和操作反馈'
@@ -260,8 +264,10 @@ class WebInterface:
                 message = self._notice
             counts = Counter(t['state'] for t in rows)
             error_rows = meta.get('scan_errors') or []
-            scope_scanned = bool(selected) and meta.get('scanned_account') == account_id and meta.get('scanned_courses') == sorted(selected)
-            if not account_id or not courses:
+            scope_scanned = bool(selected) and meta.get('scanned_account') == account_id and set(meta.get('scanned_courses') or []) - outside == selected
+            if not courses and outside:
+                course_empty = '当前没有处于开课时间内的课程。'
+            elif not account_id or not courses:
                 course_empty = '课程正在等待连接。在独立 Edge 中登录后，课程会自动出现。'
             else:
                 course_empty = '没有匹配的课程，请更换搜索词。'
@@ -280,7 +286,7 @@ class WebInterface:
             total, complete = max(0, total), max(0, complete)
             public_courses = []
             task_counts = Counter(t['classroom_id'] for t in rows)
-            for course in sorted(courses, key=lambda c: (c.get('start') or 0, str(c['classroom_id'])), reverse=True):
+            for course in sorted(courses, key=lambda c: (timestamp(c.get('start')) or 0, str(c['classroom_id'])), reverse=True):
                 cid = str(course['classroom_id'])
                 state = course_state(course)
                 public_courses.append({'id': cid, 'name': _text(course.get('name'), 160),
@@ -328,7 +334,7 @@ class WebInterface:
                 'browser': self._browser_view(desired, worker_busy, typing, meta.get('browser_media', {})),
                 'assessment': self.assessment.snapshot(meta.get('assessment_inventory') or {}, account_id, desired,
                     bool(self.embedded_browser and self.watchdog and self._alive() and not self._login_gate and not self.switching and not self.closing),
-                    meta.get('assessment_entry')),
+                    meta.get('assessment_entry'), outside),
                 'update': dict(self.updater.snapshot(), can_install=not busy and not self.demo),
                 'window': (self.window_frame.snapshot() if self.window_frame
                            else {'maximized': False, 'native_controls': False}),
@@ -490,7 +496,7 @@ class WebInterface:
         if name == 'primary':
             desired = self.store.get('desired', 'idle')
             name = self._primary(desired, self.store.get('worker_busy', False), self.store.get('account', {}),
-                                 self.store.catalog(), self.store.selected_courses(), self.store.scoped_rows())['action']
+                                 self.store.available_catalog(), self.store.available_selection(), self.store.scoped_rows())['action']
             if name == 'login':
                 return self._action('login', {})
         if name == 'choose_courses':
@@ -527,9 +533,9 @@ class WebInterface:
             raise ValueError('请先暂停并等待当前操作停止；手动打字期间请先停止打字，再开始学习')
         if name in ('select_course', 'course_toggle'):
             cid = str(payload.get('id') or '')
-            if cid not in {str(c['classroom_id']) for c in self.store.catalog()}:
+            if cid not in {str(c['classroom_id']) for c in self.store.available_catalog()}:
                 raise ValueError('这门课程已不在当前账号目录中，请刷新课程')
-            selected = set(self.store.selected_courses())
+            selected = set(self.store.available_selection())
             if 'selected' not in payload:
                 selected.symmetric_difference_update({cid})
             elif not isinstance(payload['selected'], bool):
@@ -544,7 +550,7 @@ class WebInterface:
             mode = payload.get('mode', '')
             if mode not in ('current', 'all', 'clear', 'none'):
                 raise ValueError('课程选择方式无效')
-            selected = [c['classroom_id'] for c in self.store.catalog()
+            selected = [c['classroom_id'] for c in self.store.available_catalog()
                         if mode == 'all' or (mode == 'current' and course_state(c) == '进行中')]
             self.store.select_courses(selected)
             return self._notify('课程选择已保存，开始时会自动扫描')
@@ -587,7 +593,7 @@ class WebInterface:
             desired = 'catalog' if name in ('load_courses', 'catalog') else 'scan' if name == 'scan' else 'run'
             if not self.demo and not self._alive():
                 raise ValueError('浏览器守护已停止，请先点击“恢复连接”')
-            if desired in ('scan', 'run') and not self.store.selected_courses():
+            if desired in ('scan', 'run') and not self.store.available_selection():
                 return {**self._notify('请先选择需要处理的课程'), 'navigate': 'courses', 'ok': False}
             if self.demo and desired != 'run':
                 return self._notify('演示模式只展示虚构数据，不会连接真实网站')

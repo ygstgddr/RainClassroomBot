@@ -144,11 +144,13 @@ def test_gui_selects_by_id_dates_and_blocks_changes_until_worker_stops(tmp_path)
         assert store.selected_courses() == ['1']
         assert not store.scope_scanned()
         ui.toggle_course('2')
-        assert store.selected_courses() == ['1', '2']
+        assert store.selected_courses() == ['1']
+        ui.toggle_course('3')
+        assert store.selected_courses() == ['1', '3']
         store.set('worker_busy', True)
         store.set('desired', 'paused')
         ui.select_group('none')
-        assert store.selected_courses() == ['1', '2']
+        assert store.selected_courses() == ['1', '3']
         store.set('worker_busy', False)
         ui.select_group('none')
         ui.command('scan')
@@ -157,6 +159,6 @@ def test_gui_selects_by_id_dates_and_blocks_changes_until_worker_stops(tmp_path)
         assert not ui.tree.get_children()
         assert len(store.rows()) == 4
         ui.select_group('all')
-        assert store.selected_courses() == ['1', '2', '3']
+        assert store.selected_courses() == ['1', '3']
     finally:
         root.destroy()

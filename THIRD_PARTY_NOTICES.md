@@ -18,6 +18,10 @@ Windows 发行包的 `third_party_licenses/` 保存从实际构建环境复制�
 
 `proxy_tools` 的旧版 wheel 未附带许可证文件，源码保留其上游许可证副本于 `third_party_licenses/proxy_tools/LICENSE.txt`，打包脚本会一并复制。其他组件的实际构建版本记录在发行包的 `third_party_licenses/versions.json` 中。
 
+## 界面字体
+
+工作台使用 Saira 可变字体，作者为 The Saira Project Authors。字体以 WOFF2 随程序分发，完整许可见 `third_party_licenses/Saira-OFL.txt`。
+
 ## 雨课堂图标
 
 官方图标取自雨课堂官网 favicon。图标与品牌标识归原权利人所有，项目代码许可证不覆盖品牌标识；来源与校验值见 `gui/assets/ICON_SOURCE.md`。

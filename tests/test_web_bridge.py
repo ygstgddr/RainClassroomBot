@@ -110,8 +110,9 @@ def test_empty_selection_never_runs_and_current_course_group(tmp_path):
     assert not ui.action('start')['ok']
     assert ui.action('select_courses', {'mode': 'current'})['ok']
     assert store.selected_courses() == ['10']
-    assert ui.action('select_course', {'id': '11', 'selected': True})['ok']
-    assert store.selected_courses() == ['10', '11']
+    assert not ui.action('select_course', {'id': '11', 'selected': True})['ok']
+    assert store.selected_courses() == ['10']
+    assert [c['id'] for c in ui.snapshot()['courses']] == ['10']
     assert not ui.action('select_course', {'id': 'foreign', 'selected': True})['ok']
 
 

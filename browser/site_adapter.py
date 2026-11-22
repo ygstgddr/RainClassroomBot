@@ -8,7 +8,7 @@ import math
 import time
 from urllib.parse import urlparse
 from core.errors import LoginRequired, AdaptationRequired, RetryableError
-from core.courses import timestamp
+from core.courses import timestamp, window_reason
 from core.task_types import task_kind, AUTOMATED_KINDS, manual_note
 
 
@@ -67,6 +67,14 @@ def leaves(chapters):
                 if 'id' not in leaf or 'leaf_type' not in leaf:
                     raise AdaptationRequired('叶子节点缺少 id 或 leaf_type')
                 yield leaf
+
+
+def leaf_window(leaf):
+    ends = [v for field in ('score_deadline', 'end_time', 'deadline')
+            if (v := timestamp(leaf.get(field))) is not None]
+    starts = [v for field in ('start_time', 'unlock_time', 'open_time')
+              if (v := timestamp(leaf.get(field))) is not None]
+    return {'deadline': min(ends, default=None), 'available_from': max(starts, default=None)}
 
 
 class SiteAdapter:
@@ -211,8 +219,18 @@ class SiteAdapter:
     async def scan_course(self, course, *, assessments_only=False):
         cid = course['classroom_id']
         self.report(course, '读取课程访问参数')
-        params = await self.context(cid)
+        if window_reason(course):
+            return []
+        try:
+            params = await self.context(cid)
+        except AdaptationRequired:
+            # Closed classrooms may expose dates but no longer grant a course sign.
+            if window_reason(self.course_dates.get(cid)):
+                return []
+            raise
         self.report(course, '读取章节目录')
+        if window_reason(self.course_dates.get(cid) or course):
+            return []
         data = await self.get('/mooc-api/v1/lms/learn/course/chapter', params, self.course_headers.get(cid))
         if not isinstance(data, dict) or 'course_chapter' not in data:
             raise AdaptationRequired('该课程不是已适配的 LMS 章节课程，需人工查看')
@@ -223,10 +241,13 @@ class SiteAdapter:
             nodes = [leaf for leaf in nodes if task_kind(leaf['leaf_type']) in ('homework', 'quiz', 'exam')]
         if not nodes:
             return []  # 目录确认为空时，不调用不适用的进度接口。
-        self.report(course, '读取服务器进度')
-        schedules = await self.schedule(cid)
+        windows = [leaf_window(leaf) for leaf in nodes]
+        schedules = {}
+        if any(not window_reason(None, window) for window in windows):
+            self.report(course, '读取服务器进度')
+            schedules = await self.schedule(cid)
         tasks = []
-        for leaf in nodes:
+        for leaf, window in zip(nodes, windows):
             lid = identifier(leaf['id'])
             typ = leaf['leaf_type']
             if type(typ) is not int:
@@ -241,15 +262,10 @@ class SiteAdapter:
                 note = '服务器尚无进度记录；打开任务后持续查询，明确记录完成才进入下一项'
             if done is None and kind in AUTOMATED_KINDS and state != 'locked':
                 state, note = 'needs_adapter', '服务器未提供该任务的可识别进度，不能自动判定'
-            deadline = leaf.get('score_deadline')
-            if not isinstance(deadline, (int, float)) or isinstance(deadline, bool):
-                deadline = None
-            elif deadline > 1e12:
-                deadline /= 1000
             tasks.append(dict(key=f'{self.account_id}:{cid}:{lid}', classroom_id=cid,
                               leaf_id=lid, course=course['name'], title=str(leaf.get('name') or lid),
                               leaf_type=typ, kind=kind, state=state, progress=progress,
-                              deadline=deadline, duration=None, note=note,
+                              **window, duration=None, note=note,
                               evidence=self.evidence(cid, lid, schedules[lid]) if done else ''))
         return tasks
 

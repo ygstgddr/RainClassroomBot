@@ -3,6 +3,7 @@ import argparse
 import multiprocessing
 import sys
 import tempfile
+import time
 from pathlib import Path
 from core.config import load_config
 from core.store import Store
@@ -29,10 +30,11 @@ def instance_lock(root):
 
 def demo_data(store):
     store.set('account', {'id': 'demo', 'name': '演示账号（非真实学习记录）'})
+    now = time.time()
     store.set('course_count', 2)
     store.set('course_catalog:demo', [
-        dict(classroom_id='1', name='大学英语', class_name='2026 秋 · 英语教学班', start=1787155200, end=1801411199),
-        dict(classroom_id='2', name='计算机基础', class_name='2026 春 · 计算机教学班', start=1772294400, end=1785427199)])
+        dict(classroom_id='1', name='大学英语', class_name='英语教学班', start=now - 30*86400, end=now + 60*86400),
+        dict(classroom_id='2', name='计算机基础', class_name='计算机教学班', start=now - 60*86400, end=now + 30*86400)])
     store.select_courses(['1', '2'], 'demo')
     store.set('scanned_account', 'demo')
     store.set('scanned_courses', ['1', '2'])

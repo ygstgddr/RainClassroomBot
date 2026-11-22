@@ -1,5 +1,6 @@
 """课程级并发扫描：实时进度、增量入库、部分失败和取消均有明确结果。"""
 import asyncio
+from core.courses import window_reason
 import time
 from core.errors import Interrupted, LoginRequired, AdaptationRequired
 from core.logging_setup import record
@@ -34,9 +35,10 @@ async def scan(adapter, store, config, logger, catalog_only=False):
         all_courses = await adapter.courses()
         store.set('course_count', len(all_courses))
         selected = store.selected_courses(account['id'])
+        prior = {c['classroom_id']: c for c in store.catalog(account['id'])}
+        catalog = {c['classroom_id']: {**prior.get(c['classroom_id'], {}), **c} for c in all_courses}
         if catalog_only:
             courses = all_courses
-            catalog = {c['classroom_id']: dict(c, start=None, end=None, date_error='等待读取') for c in courses}
             store.set('course_catalog:' + account['id'], list(catalog.values()))
             store.select_courses(set(selected) & set(catalog), account['id'])
         else:
@@ -64,10 +66,22 @@ async def scan(adapter, store, config, logger, catalog_only=False):
                         store.set('course_catalog:' + account['id'], list(catalog.values()))
                         progress['succeeded'] += 1
                         return
-                    tasks = await adapter.scan_course(course)
+                    cid = course['classroom_id']
+                    reason = window_reason(catalog[cid])
+                    tasks = [] if reason else await adapter.scan_course(course)
                     if store.get('desired') not in ('scan', 'run'):
                         raise Interrupted()
+                    dates = getattr(adapter, 'course_dates', {}).get(cid)
+                    if dates:
+                        catalog[cid].update({k: v for k, v in dates.items() if v is not None})
+                        store.set('course_catalog:' + account['id'], list(catalog.values()))
+                    reason = window_reason(catalog[cid])
+                    if reason:
+                        progress['succeeded'] += 1
+                        record(store, logger, '跳过课程', reason, {'course': course['name']})
+                        return
                     store.merge_course(account['id'], course['classroom_id'], tasks)
+                    tasks = [t for t in tasks if not window_reason(catalog[cid], t)]
                     progress['succeeded'] += 1
                     progress['tasks'] += len(tasks)
                     progress['empty'] += int(not tasks)

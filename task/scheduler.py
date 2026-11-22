@@ -1,6 +1,7 @@
 import asyncio
 from collections import Counter
-from core.errors import Interrupted, LoginRequired, AdaptationRequired
+from core.errors import Interrupted, LoginRequired, AdaptationRequired, OutsideStudyWindow
+from core.courses import window_reason
 from core.logging_setup import record
 from task.executor import execute
 from core.task_types import AUTOMATED_KINDS
@@ -17,22 +18,26 @@ async def run_queue(adapter, browser, store, config, logger):
         record(store, logger, '队列暂停', '课程选择已改变或尚未选择，请重新扫描所选课程')
         return
     await adapter.courses()  # 重新建立每门课程的请求上下文。
-    tasks = store.scoped_rows(account['id'])
+    catalog = {str(c['classroom_id']): c for c in store.catalog(account['id'])}
+    def unavailable(task):
+        return window_reason(catalog.get(task['classroom_id']), task)
     scope = store.get('task_scope')
+    tasks = store.scoped_rows(account['id'], include_unavailable=True, include_inactive=scope is not None)
     if scope is not None:
         by_id = {t['key']: t for t in tasks}
         ids = scope.get('ids') if isinstance(scope, dict) else None
         if (not isinstance(ids, list) or not ids or not all(isinstance(key, str) for key in ids)
                 or scope.get('account') != account['id'] or scope.get('courses') != store.selected_courses(account['id'])
                 or len(ids) != len(set(ids)) or any(key not in by_id or by_id[key]['kind'] not in AUTOMATED_KINDS
-                    or by_id[key]['state'] not in ('pending', 'running', 'completed') for key in ids)):
+                    or (not unavailable(by_id[key]) and (not by_id[key]['active']
+                        or by_id[key]['state'] not in ('pending', 'running', 'completed'))) for key in ids)):
             store.set('desired', 'paused')
             record(store, logger, '队列暂停', '所选任务范围已变化或有任务不可执行，请重新勾选；不会执行其他任务')
             return
         tasks = [by_id[key] for key in ids]
     blocked_key = store.get('blocked_task')
     blocked = next((t for t in tasks if t['key'] == blocked_key), None)
-    if blocked and blocked['state'] not in ('completed', 'pending'):
+    if blocked and not unavailable(blocked) and blocked['state'] not in ('completed', 'pending'):
         store.set('desired', 'paused')
         record(store, logger, '队列暂停', '上次中断任务尚未解决，请重试或修正适配后重新扫描', blocked)
         return
@@ -41,6 +46,11 @@ async def run_queue(adapter, browser, store, config, logger):
     for task in tasks:
         if store.get('desired') != 'run':
             raise Interrupted()
+        reason = unavailable(task)
+        if reason or not task['active']:
+            if task['state'] != 'completed':
+                record(store, logger, '跳过任务', reason or '任务已移出章节', task)
+            continue
         if task['state'] not in ('pending', 'running') or task['kind'] not in AUTOMATED_KINDS:
             continue
         if task['attempts'] >= config['max_task_attempts']:
@@ -50,6 +60,10 @@ async def run_queue(adapter, browser, store, config, logger):
             return
         processed += 1
         while task['attempts'] < config['max_task_attempts']:
+            reason = unavailable(task)
+            if reason:
+                record(store, logger, '跳过任务', reason, task)
+                break
             if store.get('desired') != 'run':
                 raise Interrupted()
             task['attempts'] += 1
@@ -57,6 +71,7 @@ async def run_queue(adapter, browser, store, config, logger):
             record(store, logger, '执行', f"尝试 {task['attempts']}", task)
             committed = False
             try:
+                task['_course_window'] = catalog.get(task['classroom_id'], {})
                 evidence = await execute(task, adapter, browser, store, config)
                 store.update(task['key'], state='completed', progress=1, evidence=evidence,
                              note='服务器进度已确认')
@@ -65,6 +80,26 @@ async def run_queue(adapter, browser, store, config, logger):
                 committed = True
                 # 完成后退出任务页面，阻止网站自行连续播放到其他任务。
                 await browser.page.goto(config['base_url'] + config['entry_path'], wait_until='domcontentloaded')
+                break
+            except OutsideStudyWindow as exc:
+                dates = getattr(adapter, 'course_dates', {}).get(task['classroom_id'])
+                if dates and task['classroom_id'] in catalog:
+                    catalog[task['classroom_id']].update({k: v for k, v in dates.items() if v is not None})
+                    store.set('course_catalog:' + account['id'], list(catalog.values()))
+                store.update(task['key'], state='pending', attempts=task['attempts'] - 1, note=str(exc))
+                record(store, logger, '跳过任务', str(exc), task)
+                store.set('current', {})
+                # Deadline cancellation can interrupt the page handler's own cleanup.
+                # Stop autoplay even when this was the last item in the queue.
+                try:
+                    await asyncio.wait_for(browser.pause_media(), 3)
+                except Exception:
+                    pass  # A closed or unresponsive player can still be navigated away from.
+                try:
+                    await browser.page.goto(config['base_url'] + config['entry_path'],
+                                            wait_until='domcontentloaded', timeout=5000)
+                except Exception:
+                    record(store, logger, '页面退出失败', '已跳过截止任务，下项将重新打开页面', task)
                 break
             except (Interrupted, LoginRequired):
                 store.update(task['key'], state='pending', attempts=task['attempts'] - 1,
@@ -92,9 +127,13 @@ async def run_queue(adapter, browser, store, config, logger):
                     return
                 # 有限指数退避；每 0.5 秒检查用户控制。
                 for _ in range(min(60, 2 ** task['attempts'] * 2)):
+                    if unavailable(task):
+                        break
                     if store.get('desired') != 'run':
                         raise Interrupted()
                     await asyncio.sleep(.5)
+                if unavailable(task):
+                    continue
                 if browser.page.is_closed() or not browser.context.browser.is_connected():
                     # 交给进程守护重建 Edge，数据库已保存任务及尝试次数。
                     raise RuntimeError('Edge 已关闭，需要进程重建')

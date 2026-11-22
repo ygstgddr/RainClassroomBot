@@ -1,6 +1,7 @@
 import asyncio
 import time
-from core.errors import Interrupted, RetryableError, AdaptationRequired
+from core.errors import Interrupted, LoginRequired, RetryableError, AdaptationRequired, OutsideStudyWindow
+from core.courses import timestamp, window_reason
 from handler.video import VideoHandler
 from handler.article import ArticleHandler
 from handler.slides import SlidesHandler
@@ -23,18 +24,54 @@ async def _preflight_status(task, adapter, store):
 
 
 async def execute(task, adapter, browser, store, config):
-    if store.get('desired') != 'run':
-        raise Interrupted()
     if task['kind'] not in AUTOMATED_KINDS:
         raise AdaptationRequired('该任务类型不支持自动阅读，请在网页处理')
+    course = task.get('_course_window', {})
+    def check_window(now=None):
+        fresh = getattr(adapter, 'course_dates', {}).get(task['classroom_id']) or {}
+        bounds = {**course, **{k: v for k, v in fresh.items() if v is not None}}
+        reason = window_reason(bounds, task, now)
+        if reason:
+            raise OutsideStudyWindow(reason)
+        return bounds
+
+    bounds = check_window()
+    ends = [v for raw in (bounds.get('end'), task.get('deadline')) if (v := timestamp(raw))]
+    try:
+        if ends:
+            end = min(ends)
+            work = asyncio.create_task(_execute(task, adapter, browser, store, config, check_window))
+            try:
+                done, _ = await asyncio.wait({work}, timeout=max(0, end - time.time()))
+                if not done:
+                    # Windows timers may wake a fraction early. Classify our own
+                    # deadline separately from timeouts raised by the website.
+                    check_window(max(end, time.time()))
+                return await work
+            finally:
+                work.cancel()
+                await asyncio.gather(work, return_exceptions=True)
+        return await _execute(task, adapter, browser, store, config, check_window)
+    except (Interrupted, LoginRequired):
+        raise
+    except Exception:
+        check_window()
+        raise
+
+
+async def _execute(task, adapter, browser, store, config, check_window):
+    if store.get('desired') != 'run':
+        raise Interrupted()
     # 每次重试和重启首先向服务器复查，防止重复播放已完成任务。
     done, progress, evidence = await _preflight_status(task, adapter, store)
     if done:
         return evidence
+    check_window()
     info = await adapter.prepare_slides(task) if task['kind'] == 'slides' else None
     if store.get('desired') != 'run':
         raise Interrupted()
     entry_task = dict(task, _slides_path=info['path']) if info else task
+    check_window()
     page = await browser.open_task(entry_task)
     handler = SlidesHandler(page, config, adapter, info) if info else VideoHandler(page, config) if task['kind'] == 'video' else ArticleHandler(page, config)
     started = time.monotonic()
@@ -47,6 +84,7 @@ async def execute(task, adapter, browser, store, config):
     next_publish = 0
     try:
         while True:
+            check_window()
             if store.get('desired') != 'run':
                 await browser.pause_media()
                 raise Interrupted()

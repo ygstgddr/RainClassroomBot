@@ -6,6 +6,7 @@ import uuid
 from core.assessment_model import AssessmentModelError, review_questions, summarize_inventory
 from core.assessment_agent import run_agent
 from core.assessment_credentials import clear_key, load_key, save_key
+from core.courses import window_reason
 from core.config import app_root
 from gui.assessment_tools import AGENT_PROMPT, BrowserAgentTools
 
@@ -75,12 +76,13 @@ class AssessmentPanel:
 
         threading.Thread(target=run, daemon=True, name='RainAssessment').start()
 
-    def snapshot(self, report, account, desired, available, entry=None):
+    def snapshot(self, report, account, desired, available, entry=None, excluded_courses=()):
         if self.account is not None and account != self.account:
             self.reset(clear_chat=True)
         self.account = account
         report = report if report.get('account') == account else {}
-        tasks = report.get('tasks', [])
+        tasks = [task for task in report.get('tasks', []) if str(task.get('id', '')).partition(':')[0] not in excluded_courses
+                 and not window_reason(None, task) and task.get('state') != 'locked']
         stats = {
             '课程数': report.get('courses', 0), '已扫描课程': report.get('finished', 0),
             '读取失败课程': len(report.get('failed', [])), '按类型': dict(Counter(item['kind'] for item in tasks)),
@@ -259,7 +261,9 @@ class AssessmentPanel:
                 raise ValueError('请先配置密钥并扫描任务。')
             account = owner.store.get('account', {}).get('id')
             report = owner.store.get('assessment_inventory', {})
+            catalog = {str(c['classroom_id']): c for c in owner.store.catalog(account)}
             task = next((item for item in report.get('tasks', []) if item['id'] == payload['id']
+                         and not window_reason(catalog.get(item['id'].partition(':')[0]), item)
                          and item['state'] not in ('completed', 'locked')), None)
             if (not account or report.get('account') != account
                     or report.get('phase') not in ('done', 'cancelled', 'error') or not task):

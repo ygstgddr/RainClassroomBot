@@ -2,9 +2,11 @@
 
 基于 **Python + Playwright + Microsoft Edge + pywebview / WebView2** 的 Windows 桌面任务管理工具。按开课时间选择课程，扫描未完成任务，通过网页正常操作处理已适配的视频、图文和 PPT，并复查服务器完成记录。
 
-当前版本 **0.8.9**。需要 Windows 10/11 x64、Microsoft Edge 和 Microsoft Edge WebView2 Runtime。
+当前版本 **0.8.10**。需要 Windows 10/11 x64、Microsoft Edge 和 Microsoft Edge WebView2 Runtime。
 
-启动先显示玻璃登录页，点击“登录”后在软件内打开学习浏览器，确认账号后自动进入课程页。内置浏览器默认静音。安装时运行发布页中的 `RainClassroomBot-0.8.9-Windows-x64-Setup.exe`，按提示选择目录即可，无需 Python 或管理员权限。
+升级后可在「我的课程」刷新课程，再重新扫描任务，补齐旧记录的起止时间。已结课、尚未开课和时间范围外的任务会自动隐藏。任务在播放或等待确认时截止，助手会记下跳过原因并继续下一项。
+
+启动先显示玻璃登录页，点击“登录”后在软件内打开学习浏览器，确认账号后自动进入课程页。内置浏览器默认静音。安装时运行发布页中的 `RainClassroomBot-0.8.10-Windows-x64-Setup.exe`，按提示选择目录即可，无需 Python 或管理员权限。
 
 **旧版用户：**先正常退出助手，安装时选择原 `RainClassroomBot.exe` 所在文件夹，可继续使用原登录和任务数据。装到不同目录不会自动迁移账号。升级不覆盖已有配置，卸载也保留配置、登录与任务记录。详细说明见 [安装与升级](docs/INSTALLER.md)。
 
@@ -67,13 +69,13 @@
 ## 安装 Windows 版本
 
 1. 安装 Microsoft Edge，并确认已安装 **Microsoft Edge WebView2 Runtime**。若缺少运行时，从 [Microsoft 官方下载页](https://developer.microsoft.com/en-us/microsoft-edge/webview2/consumer/)安装 Evergreen WebView2 Runtime 后再打开助手。
-2. 打开 [Releases](https://github.com/ygstgddr/RainClassroomBot/releases/latest)，下载 `RainClassroomBot-0.8.9-Windows-x64-Setup.exe`。
+2. 打开 [Releases](https://github.com/ygstgddr/RainClassroomBot/releases/latest)，下载 `RainClassroomBot-0.8.10-Windows-x64-Setup.exe`。
 3. 双击安装包。已有版本请选择原安装目录。安装后从开始菜单启动雨课堂助手。
 
-发布页提供 `SHA256SUMS-0.8.9.txt`。可在 PowerShell 中计算下载包的校验值并比对。
+发布页提供 `SHA256SUMS-0.8.10.txt`。可在 PowerShell 中计算下载包的校验值并比对。
 
 ```powershell
-Get-FileHash .\RainClassroomBot-0.8.9-Windows-x64-Setup.exe -Algorithm SHA256
+Get-FileHash .\RainClassroomBot-0.8.10-Windows-x64-Setup.exe -Algorithm SHA256
 ```
 
 ## 自动答题（实验性）

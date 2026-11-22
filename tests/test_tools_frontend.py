@@ -71,6 +71,29 @@ def test_courses_are_readable_and_complete_at_compact_width():
     asyncio.run(scenario())
 
 
+def test_opening_year_filter_survives_window_resize_and_snapshot():
+    async def scenario():
+        state = display_snapshot()
+        async with async_playwright() as engine:
+            browser = await engine.chromium.launch(channel="msedge", headless=True)
+            try:
+                page = await open_page(browser, state, [])
+                state["courses"].append(dict(state["courses"][0], id="older", start_date="2024-09-01"))
+                await page.evaluate("s=>window.RainUI.applySnapshot(s)", state)
+                await page.locator("#course-year").select_option("2024")
+                assert await page.locator('.course-card').count() == 1
+                assert await page.locator('.course-card').get_attribute('data-id') == 'older'
+                await page.set_viewport_size({"width": 900, "height": 660})
+                assert await page.locator('#course-year').input_value() == "2024"
+                state["courses"].pop()
+                await page.evaluate("s=>window.RainUI.applySnapshot(s)", state)
+                assert await page.locator('#course-year').input_value() == ""
+                assert await page.locator('.course-card').get_attribute('aria-checked') == 'true'
+            finally:
+                await browser.close()
+    asyncio.run(scenario())
+
+
 def test_only_confirmed_target_can_receive_source_and_snapshots_keep_editor():
     async def scenario():
         snapshot, actions = display_snapshot(), []

@@ -7,6 +7,7 @@ import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from core.courses import window_reason
 
 
 class Store:
@@ -28,6 +29,10 @@ class Store:
                     id INTEGER PRIMARY KEY AUTOINCREMENT, time REAL, course TEXT,
                     task TEXT, status TEXT, reason TEXT);
             ''')
+            # Serialize this migration with workers opening an older database.
+            db.execute('BEGIN IMMEDIATE')
+            if 'available_from' not in {r['name'] for r in db.execute('PRAGMA table_info(tasks)')}:
+                db.execute('ALTER TABLE tasks ADD COLUMN available_from REAL')
 
     @contextmanager
     def db(self):
@@ -59,7 +64,10 @@ class Store:
             for task in tasks:
                 task = dict(task, account=account, updated=time.time(), active=1)
                 columns = list(task)
-                update = ','.join(f'{c}=excluded.{c}' for c in columns if c != 'key')
+                keep = {'key'}
+                if window_reason(None, task) and not task.get('evidence'):
+                    keep.update(('state', 'progress', 'evidence', 'attempts', 'note'))
+                update = ','.join(f'{c}=excluded.{c}' for c in columns if c not in keep)
                 db.execute(f"INSERT INTO tasks({','.join(columns)}) VALUES({','.join('?' for _ in columns)}) "
                            f'ON CONFLICT(key) DO UPDATE SET {update}', tuple(task.values()))
 
@@ -72,23 +80,33 @@ class Store:
         # 没选过和主动清空都表示不扫描，绝不回退到所有课程。
         return self.get('selected_courses:' + account, [])
 
+    def available_catalog(self, account=None):
+        return [course for course in self.catalog(account) if not window_reason(course)]
+
+    def available_selection(self, account=None):
+        hidden = {str(c['classroom_id']) for c in self.catalog(account) if window_reason(c)}
+        return [cid for cid in self.selected_courses(account) if cid not in hidden]
+
     def select_courses(self, ids, account=None):
         account = account or self.get('account', {}).get('id', '')
         self.set('selected_courses:' + account, sorted(set(str(cid) for cid in ids)))
 
-    def scoped_rows(self, account=None):
+    def scoped_rows(self, account=None, *, include_unavailable=False, include_inactive=False):
         selected = set(self.selected_courses(account))
-        return [t for t in self.rows(account) if t['classroom_id'] in selected]
+        courses = {str(c['classroom_id']): c for c in self.catalog(account)}
+        return [t for t in self.rows(account, include_inactive=include_inactive) if t['classroom_id'] in selected
+                and (include_unavailable or not window_reason(courses.get(t['classroom_id']), t))]
 
     def scope_scanned(self, account=None):
         account = account or self.get('account', {}).get('id', '')
         selected = self.selected_courses(account)
         return bool(selected) and self.get('scanned_account') == account and self.get('scanned_courses') == selected
 
-    def rows(self, account=None):
+    def rows(self, account=None, *, include_inactive=False):
         account = account or self.get('account', {}).get('id', '')
+        visibility = '' if include_inactive else 'AND active=1 '
         with self.db() as db:
-            rows = db.execute('SELECT * FROM tasks WHERE account=? AND active=1 ORDER BY '
+            rows = db.execute('SELECT * FROM tasks WHERE account=? ' + visibility + 'ORDER BY '
                               'CASE WHEN deadline>0 THEN deadline ELSE 99999999999 END, '
                               'CASE kind WHEN "article" THEN 0 WHEN "video" THEN 1 ELSE 2 END, course, leaf_id',
                               (account,)).fetchall()

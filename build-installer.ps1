@@ -15,7 +15,7 @@ if (-not $Compiler) {
 }
 if (-not $Compiler -or -not (Test-Path -LiteralPath $Compiler)) { throw 'Install Inno Setup 6.7+ or supply -Compiler <path-to-ISCC.exe>.' }
 $SourceDir = (Resolve-Path -LiteralPath $SourceDir).Path
-foreach ($required in @('RainClassroomBot.exe','VERSION.txt','config\config.yaml','_internal\gui\web\app.css','docs','third_party_licenses')) {
+foreach ($required in @('RainClassroomBot.exe','VERSION.txt','config\config.yaml','_internal\gui\web\app.css','_internal\gui\web\workspace.css','docs','third_party_licenses')) {
     if (-not (Test-Path -LiteralPath (Join-Path $SourceDir $required))) { throw "Missing build content: $required. Run build.ps1 first." }
 }
 $version = (Get-Content -LiteralPath (Join-Path $SourceDir 'VERSION.txt') -Raw).Trim()

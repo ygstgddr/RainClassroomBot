@@ -12,3 +12,7 @@ class RetryableError(Exception):
 
 class Interrupted(Exception):
     """用户暂停、重新扫描或退出。"""
+
+
+class OutsideStudyWindow(Exception):
+    """A published course or task boundary prevents credited study."""

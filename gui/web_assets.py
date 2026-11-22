@@ -9,15 +9,18 @@ def load_document(typing_window=False):
     base = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1])) / 'gui' / 'web'
     html = (base / 'index.html').read_text(encoding='utf8')
     if typing_window:
-        html = html.replace('<html lang="zh-CN">', '<html lang="zh-CN" class="typing-window desktop-glass typing-opaque">', 1)
+        html = html.replace('<html lang="zh-CN"', '<html lang="zh-CN" class="typing-window desktop-glass typing-opaque"', 1)
         html = html.replace('雨课堂 · 学习工作台</span></div>', '雨课堂 · 模拟打字</span></div>', 1)
-    css = (base / 'app.css').read_text(encoding='utf8')
+    for stylesheet in ('app.css', 'workspace.css'):
+        css = (base / stylesheet).read_text(encoding='utf8')
+        pattern = rf'<link\b[^>]*href=["\']{re.escape(stylesheet)}["\'][^>]*>'
+        html, count = re.subn(pattern, lambda _: '<style>' + css + '</style>', html)
+        if count != 1:
+            raise RuntimeError(f'界面样式未完整加载：{stylesheet}')
     javascript = (base / 'app.js').read_text(encoding='utf8')
-    html, replaced_css = re.subn(r'<link\b[^>]*href=[\"\']app\.css[\"\'][^>]*>',
-                                 lambda _: '<style>' + css + '</style>', html)
     html, replaced_js = re.subn(r'<script\b[^>]*src=[\"\']app\.js[\"\'][^>]*>\s*</script>',
                                 lambda _: '<script>' + javascript + '</script>', html)
-    if replaced_css != 1 or replaced_js != 1:
+    if replaced_js != 1:
         raise RuntimeError('界面资源未完整加载，请重新解压整个程序包')
     # Bundle the official logo locally. No external image request, file URL,
     # or server directory is required by the native HTML document.

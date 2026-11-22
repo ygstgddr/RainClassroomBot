@@ -82,6 +82,14 @@ def test_web_selection_primary_pause_and_search(tmp_path):
             browser = await engine.chromium.launch(channel='msedge', headless=True)
             try:
                 page, bridge = await open_ui(browser, store)
+                bulk = page.locator('.bulk-select')
+                await bulk.locator('summary').press('Enter')
+                await bulk.locator('[data-action=select_clear]').click()
+                await page.wait_for_function('window.RainUI.getState().snapshot.counts.selected===0')
+                assert not await bulk.evaluate('el => el.open')
+                await bulk.locator('summary').press('Enter')
+                await bulk.locator('[data-action=select_all]').click()
+                await page.wait_for_function('window.RainUI.getState().snapshot.counts.selected===2')
                 await page.locator('.course-card').first.click()
                 await page.wait_for_function('window.RainUI.getState().snapshot.counts.selected===1')
                 assert len(store.selected_courses()) == 1
@@ -101,7 +109,7 @@ def test_web_selection_primary_pause_and_search(tmp_path):
     asyncio.run(scenario())
 
 
-def test_real_glass_animation_reduced_motion_and_safe_text(tmp_path):
+def test_glass_navigation_motion_and_safe_text(tmp_path):
     async def scenario():
         store = Store(tmp_path); demo_data(store); store.set('desired', 'idle')
         async with async_playwright() as engine:
@@ -110,8 +118,8 @@ def test_real_glass_animation_reduced_motion_and_safe_text(tmp_path):
                 page, bridge = await open_ui(browser, store)
                 errors = []; page.on('pageerror', lambda error: errors.append(str(error)))
                 await page.wait_for_timeout(400)
-                glass = await page.locator('.sidebar').evaluate('el=>({background:getComputedStyle(el).backgroundColor,blur:getComputedStyle(el).backdropFilter})')
-                assert 'rgba' in glass['background'] and 'blur' in glass['blur']
+                rail = await page.locator('.sidebar').evaluate('el=>({background:getComputedStyle(el).backgroundColor,blur:getComputedStyle(el).backdropFilter})')
+                assert 'rgba' in rail['background'] and 'blur' in rail['blur']
                 card = page.locator('.course-card').first
                 before = await card.evaluate('el=>getComputedStyle(el).transform')
                 await card.hover(); await page.wait_for_timeout(250)

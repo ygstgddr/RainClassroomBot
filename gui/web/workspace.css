@@ -1,0 +1,31 @@
+/* Compact course catalog. Glass colors and the native desktop backdrop come
+   from app.css so the same cards work with and without DWM composition. */
+.app-shell:has(#page-courses.is-active) .hero { min-height: 104px; padding-block: 18px; }
+.app-shell:has(#page-courses.is-active) .hero.has-progress { padding-bottom: 38px; }
+.app-shell:has(#page-courses.is-active) .metrics { margin-block: 12px 17px; }
+.catalog-toolbar { gap: 8px; margin-bottom: 12px; position: relative; }
+.catalog-toolbar:has(details[open]) { z-index: 4; }
+.catalog-toolbar .search-field { flex: 1 1 150px; min-width: 110px; }
+.catalog-year, .bulk-select summary { font: inherit; font-size: 12px; color: var(--ink); border-radius: 9px; padding: 6px 8px; }
+.catalog-year { border: 1px solid var(--line); background: var(--glass); }
+.catalog-year option { background: #fff; color: #253149; }
+.desktop-glass .catalog-year option { background: #283445; color: #f7f9fc; }
+.bulk-select { position: relative; }
+.bulk-select summary { cursor: pointer; }
+.bulk-select .filter-actions { position: absolute; right: 0; top: 100%; min-width: 145px; padding: 6px; display: grid; gap: 3px; border-radius: 11px; background: #f4f7fc; box-shadow: 0 6px 18px #0002; }
+.desktop-glass .bulk-select .filter-actions { background: #263240; }
+.bulk-select .text-button { text-align: left; }
+.catalog-toolbar .segmented small { margin-inline-start: 4px; font-variant-numeric: tabular-nums; }
+.course-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(min(100%,255px),1fr)); gap: 11px; }
+.course-card { display: grid; grid-template-columns: minmax(0,1fr) auto; grid-template-rows: 1fr auto;
+  align-items: start; gap: 12px 8px; padding: 16px; min-height: 112px; text-align: left; }
+.course-card h3 { min-height: 0; font-size: 18px; line-height: 1.47; margin: 0; overflow-wrap: anywhere; }
+.course-class { display: block; font-size: 12px; color: var(--muted); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; margin-top: 3px; }
+.course-name { min-width: 0; }
+.course-check { grid-column: 2; grid-row: 1; width: 21px; height: 21px; }
+.course-card .pill { grid-column: 1; grid-row: 2; justify-self: start; align-self: end; font-size: 12px; }
+.course-dates { grid-column: 1 / -1; grid-row: 3; display: flex; align-items: center; gap: 5px; color: var(--muted);
+  padding-top: 7px; border-top: 1px solid var(--line); font-size: 12px; font-variant-numeric: tabular-nums; }
+.course-dates .icon { width: 13px; height: 13px; }
+.course-dates .course-date { display: inline; margin: 0; font-size: inherit; color: inherit; }
+.course-card:focus-visible, .bulk-select summary:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }

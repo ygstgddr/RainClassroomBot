@@ -19,6 +19,7 @@
   const fingerprints = { courses: '', tasks: '', activity: '', history: '', assessment: '', chat: '' };
   let assessmentTab = 'chat', assessmentKeySettings = false;
   let assessmentFeedback = '';
+  let previousReply;
   const assessmentEfforts = ['none', 'low', 'high', 'max'];
   const assessmentEffortLabels = ['快速', '低', '高', '最大'];
   let pollTimer = null, pollRunning = false, snapshotPromise = null, pollGeneration = 0, toastTimer = null, errorsInRow = 0, filtersInitialized = false;
@@ -197,7 +198,7 @@
       tasks.forEach(t => {
         const item = make('li', 'assessment-task');
         const mark = make('span', 'assessment-mark');
-        mark.append(icon(t.state === 'locked' ? 'clock' : 'file'));
+        mark.append(icon(t.state === 'locked' ? 'clock' : t.kind === 'exam' ? 'book' : 'file'));
         const copy = make('div');
         const classroom = occurrences.get(taskName(t)) > 1 ? ` · 班级 ${asText(t.id).split(':')[0]}` : '';
         const state = ({ locked: '未开放', manual: '可核对', unknown: '进度未知' })[t.state] || t.state;
@@ -297,25 +298,41 @@
   }
 
   function renderAssessmentChat(history, liveStep, receipt) {
-    const hash = fingerprint([history, liveStep, receipt]);
-    if (fingerprints.chat === hash) return;
+    const hash = fingerprint([history, receipt]);
+    const log = $('assessment-chat');
+    if (fingerprints.chat === hash) {
+      const live = log.querySelector('.assessment-live');
+      if (!liveStep) live?.remove();
+      else if (!live) log.append(make('p', 'assessment-live', liveStep));
+      else if (live.textContent !== liveStep) live.textContent = liveStep;
+      return;
+    }
     fingerprints.chat = hash;
-    const log = $('assessment-chat'), messages = document.createDocumentFragment();
+    const messages = document.createDocumentFragment();
     const top = log.scrollTop;
     const nearBottom = log.scrollHeight - top - log.clientHeight < 55;
     const openDetails = new Set([...log.querySelectorAll('details[open]')].map(node => node.dataset.messageKey));
+    const tail = history.at(-1);
+    const newReply = tail && (tail.role !== previousReply?.role || tail.text !== previousReply?.text);
+    previousReply = tail;
     if (!history.length) {
       const welcome = make('div', 'assessment-welcome');
-      const mark = make('span', 'assessment-mark');
-      mark.append(icon('sparkles'));
-      welcome.append(mark, make('h4', '', '想聊点什么？'),
-        make('p', '', '在这里与 DeepSeek 聊天。需要填写、核对并提交时，可从待办任务启动自动执行。'),
-        actionButton('查看任务待办', 'assessment_tab_tasks', 'list'));
+      const ask = make('button', 'assessment-start-choice');
+      ask.type = 'button';
+      ask.append(icon('file'), make('span', '', '输入问题'), icon('arrow'));
+      ask.addEventListener('click', () => $('assessment-chat-input').focus());
+      const tasks = actionButton('查看任务待办', 'assessment_tab_tasks', 'list');
+      tasks.className = 'assessment-start-choice';
+      tasks.append(icon('arrow'));
+      welcome.append(make('h4', '', '新对话'),
+        make('p', '', '分析当前页面时，勾选「读网页」。'),
+        ask, tasks);
       messages.append(welcome);
     }
     history.forEach((item, index) => {
       const user = item.role === 'user';
       const entry = make('article', user ? 'assessment-message assessment-user' : 'assessment-message');
+      if (index === history.length - 1 && newReply) entry.classList.add('is-arriving');
       entry.setAttribute('aria-label', user ? '你' : 'DeepSeek');
       if (!user) {
         const label = make('div', 'assessment-assistant-label');
@@ -328,7 +345,9 @@
         const details = make('details', 'assessment-reasoning');
         details.dataset.messageKey = `${index}:${asText(item.text).slice(0, 100)}`;
         details.open = openDetails.has(details.dataset.messageKey);
-        details.append(make('summary', '', item.reasoning ? '推理与工具步骤' : '工具步骤'));
+        const detailTitle = make('summary', '', item.reasoning ? '推理与工具步骤' : '工具步骤');
+        if (item.steps?.length) detailTitle.append(make('span', 'assessment-step-count', String(item.steps.length)));
+        details.append(detailTitle);
         if (item.steps?.length) {
           const steps = make('ol', 'assessment-steps');
           item.steps.forEach(step => steps.append(make('li', '', step)));
@@ -463,7 +482,7 @@
     setText('login-destination-name', label);
     setText('login-destination-url', s.site.url || '请选择你学校使用的雨课堂站点');
     setText('login-version', s.version ? '工作台 · v' + s.version.replace(/^v/, '') + (s.development ? ' · 开发版' : '') : '雨课堂学习工作台');
-    setText('login-panel-title', status === 'waiting' ? '在浏览器中完成登录' : status === 'error' ? '重新连接，继续就好' : '连接你的学习账号');
+    setText('login-panel-title', status === 'waiting' ? '在浏览器中完成登录' : status === 'error' ? '重新连接账号' : '账号登录');
     const defaults = { idle: '点击后打开 Edge，确认登录后自动进入课程页。', connecting: '正在打开 Edge 并检查已有登录状态…', waiting: '请在 Edge 中完成登录，这里会自动同步。', error: '暂时未能连接，请重新登录或检查站点地址。' };
     const message = s.state.login_message || defaults[status] || defaults.idle;
     setText('login-status', s.browser?.enabled ? message.replace(/Edge(?: 窗口)?/g, '内置浏览器') : message);
@@ -521,10 +540,13 @@
 
   function renderHeader() {
     const s = ui.snapshot, phase = s.state.phase, primary = s.state.primary || {}, counts = s.counts;
-    const titles = { running: '正在稳稳推进。', scanning: '正在整理学习任务。', loading_courses: '正在连接你的课程。', login_required: '登录后，继续就好。', paused: '暂歇一下，进度已保留。', pausing: '正在保存当前进度。', switching: '正在切换学习空间。', closing: '正在保存并退出。', error: '有一件事需要处理。' };
-    setText('hero-title', titles[phase] || (counts.selected ? '已准备好，轻松开始。' : '选好课程，即可开始。'));
+    document.querySelector('.hero').dataset.phase = phase;
+    const titles = { running: '任务执行中', scanning: '扫描任务', loading_courses: '读取课程', login_required: '需要登录', paused: '任务已暂停', pausing: '保存进度', switching: '切换站点', closing: '保存并退出', error: '任务需要处理' };
+    const queuePage = ui.page === 'tasks';
+    setText('hero-title', titles[phase] || (queuePage ? '任务队列' : '我的课程'));
     const description = s.state.message || '选择需要处理的课程，工作台会自动扫描并安排任务。';
-    setText('hero-description', description);
+    const courseHint = counts.selected ? `已选 ${counts.selected} 门课程，开始后自动扫描任务。` : '勾选课程，或用「批量选择」选中所有进行中的课程。';
+    setText('hero-description', phase === 'idle' ? (queuePage ? '切换自动或手动分类，查看任务和处理进度。' : courseHint) : description);
     setText('footer-status', description);
     setText('site-label', s.site.label || '雨课堂');
     $('site-button').title = asText(s.site.url);
@@ -534,7 +556,6 @@
     const initial = s.account.logged_in && s.account.name ? String(s.account.name).trim().slice(0, 1) : '';
     if (avatar.dataset.initial !== initial) { avatar.replaceChildren(initial ? document.createTextNode(initial) : icon('user')); avatar.dataset.initial = initial; }
     setText('version-label', s.version ? 'v' + s.version.replace(/^v/, '') + (s.development ? ' · 开发版' : '') : '');
-    setText('selection-summary', counts.selected ? `${counts.selected} 门已选课程 · 自动安排任务` : '尚未选择课程');
     setText('nav-course-count', counts.courses);
     setText('nav-task-count', counts.tasks);
     setText('metric-selected', counts.selected);
@@ -557,7 +578,7 @@
     dot.classList.toggle('is-ready', !busy && s.account.logged_in);
     setText('connection-title', phase === 'error' ? '工作台需要恢复' : busy ? '任务正在推进' : s.account.logged_in ? '学习账号已连接' : '等待学习账号登录');
     setText('connection-sub', busy ? '进度自动保存，可随时暂停' : s.site.label ? '当前站点 · ' + s.site.label : '登录后将自动读取课程');
-    setText('footer-hint', s.demo || window.__RAIN_DEMO__ ? '演示模式 · 数据均为虚构' : '选课 · 开始 · 轻松管理');
+    setText('footer-hint', s.demo || window.__RAIN_DEMO__ ? '演示模式 · 数据均为虚构' : '');
     const progressVisible = busy || (phase === 'paused' && counts.tasks > 0);
     $('workflow-progress').hidden = !progressVisible;
     document.querySelector('.hero').classList.toggle('has-progress', progressVisible);
@@ -578,24 +599,54 @@
   function createCourseNode(course) {
     const node = make('button', 'course-card glass');
     node.type = 'button'; node.dataset.id = asText(course.id); node.dataset.testid = 'course-card'; node.setAttribute('role', 'checkbox');
-    const top = make('div', 'course-top');
-    const symbol = make('span', 'course-symbol'); symbol.appendChild(icon('book'));
     const check = make('span', 'course-check'); check.appendChild(icon('check'));
-    top.append(symbol, check);
     const title = make('h3');
-    const date = make('p', 'course-date'); date.append(icon('clock'), make('span'));
-    const bottom = make('div', 'course-bottom'); bottom.append(make('span', 'pill'), make('span', 'course-selected-note'));
-    node.append(top, title, date, bottom);
-    node._parts = { title, date: date.lastChild, status: bottom.firstChild, note: bottom.lastChild };
+    const name = make('div', 'course-name');
+    const group = make('small', 'course-class');
+    name.append(title, group);
+    const start = make('time', 'course-date'), end = make('time', 'course-date course-end');
+    const status = make('span', 'pill');
+    const dates = make('div', 'course-dates');
+    const separator = document.createTextNode(' – ');
+    dates.append(icon('clock'), start, separator, end);
+    node.append(name, check, status, dates);
+    node._parts = { title, group, start, end, separator, status };
     return node;
   }
 
-  const tones = [{ tone: '#6c92c4', tint: 'rgba(142,180,232,.14)' }, { tone: '#9b86bf', tint: 'rgba(180,155,219,.13)' }, { tone: '#ab947d', tint: 'rgba(218,183,154,.12)' }, { tone: '#689b91', tint: 'rgba(135,188,171,.12)' }, { tone: '#a385a8', tint: 'rgba(199,155,205,.1)' }, { tone: '#899aba', tint: 'rgba(156,177,212,.12)' }];
-  function courseTone(id) { let hash = 0; for (const char of asText(id)) hash = (hash * 31 + char.charCodeAt(0)) >>> 0; return tones[hash % tones.length]; }
   const dateShort = (text) => { const value = asText(text); return !value || /未提供|未知/.test(value) ? '时间未提供' : value.slice(0, 10); };
+  const openingYear = course => asText(course.start_date).match(/^\d{4}/)?.[0] || '';
+  let selectedYear = '', yearOptionsKey;
   function renderCourses(force = false) {
     const s = ui.snapshot; if (!s || (ui.page !== 'courses' && !force)) return;
-    const courses = s.courses.filter((c) => asText(c.name).toLocaleLowerCase().includes(ui.courseSearch.toLocaleLowerCase()) && (ui.courseFilter === 'all' || (ui.courseFilter === 'current' && (c.current || c.status === '进行中')) || (ui.courseFilter === 'selected' && c.selected)));
+    const yearCounts = new Map();
+    for (const course of s.courses) {
+      const year = openingYear(course) || 'unknown';
+      yearCounts.set(year, (yearCounts.get(year) || 0) + 1);
+    }
+    const yearIds = [...yearCounts.keys()].filter(id => id !== 'unknown').sort().reverse();
+    if (yearCounts.has('unknown')) yearIds.push('unknown');
+    if (selectedYear && !yearCounts.has(selectedYear)) selectedYear = '';
+    const yearKey = JSON.stringify([...yearCounts]);
+    if (yearKey !== yearOptionsKey) {
+      yearOptionsKey = yearKey;
+      const menu = [];
+      for (const id of ['', ...yearIds]) {
+        const label = id === 'unknown' ? '日期未提供' : id || '全部年份';
+        menu.push(new Option(label, id));
+      }
+      $('course-year').replaceChildren(...menu);
+    }
+    $('course-year').value = selectedYear;
+    const matchesYear = course => !selectedYear || (openingYear(course) || 'unknown') === selectedYear;
+    const query = ui.courseSearch.trim().toLocaleLowerCase();
+    const matches = s.courses.filter(c => matchesYear(c) &&
+      [c.name, c.class_name].some(value => asText(value).toLocaleLowerCase().includes(query)));
+    setText('course-all-count', matches.length);
+    setText('course-current-count', matches.filter(c => c.current || c.status === '进行中').length);
+    setText('course-selected-count', matches.filter(c => c.selected).length);
+    const courses = matches.filter(c =>
+      (ui.courseFilter === 'all' || (ui.courseFilter === 'current' && (c.current || c.status === '进行中')) || (ui.courseFilter === 'selected' && c.selected)));
     const hash = fingerprint([courses, locked(), ui.courseFilter, ui.courseSearch, s.empty.courses, s.account.logged_in]);
     if (!force && fingerprints.courses === hash) return;
     fingerprints.courses = hash;
@@ -608,20 +659,27 @@
       const key = asText(course.id);
       let node = courseNodes.get(key);
       if (!node) { node = createCourseNode(course); courseNodes.set(key, node); }
-      const parts = node._parts, tone = courseTone(key);
-      node.style.setProperty('--course-tone', tone.tone); node.style.setProperty('--course-tint', tone.tint);
+      const parts = node._parts;
       node.classList.toggle('is-selected', Boolean(course.selected));
       node.classList.toggle('is-disabled', locked());
       node.disabled = locked();
       node.setAttribute('aria-checked', String(Boolean(course.selected)));
       node.setAttribute('aria-label', `${asText(course.name)}，${course.selected ? '已选择' : '未选择'}，${asText(course.status || '时间未知')}`);
-      const fullDate = `${dateShort(course.start_date)} → ${dateShort(course.end_date)}`;
       node.title = `${asText(course.name)}\n开课：${asText(course.start_date || '未提供')}\n结课：${asText(course.end_date || '未提供')}${course.class_name ? '\n' + course.class_name : ''}${course.message ? '\n' + course.message : ''}`;
       parts.title.textContent = asText(course.name || '未命名课程');
-      parts.date.textContent = fullDate;
+      parts.group.textContent = asText(course.class_name);
+      parts.group.hidden = !parts.group.textContent;
+      parts.start.textContent = dateShort(course.start_date);
+      parts.end.textContent = dateShort(course.end_date);
+      const hasStart = parts.start.textContent !== '时间未提供';
+      const hasEnd = parts.end.textContent !== '时间未提供';
+      parts.separator.textContent = hasStart && hasEnd ? ' – ' : '';
+      if (!hasStart || !hasEnd) {
+        parts.start.textContent = hasStart ? parts.start.textContent + ' 开课' : hasEnd ? '截至' : '未公布起止时间';
+        if (!hasEnd) parts.end.textContent = '';
+      }
       parts.status.className = 'pill' + (course.current || course.status === '进行中' ? ' current' : course.status === '未开课' ? ' future' : '');
       parts.status.textContent = asText(course.status || '时间未知');
-      parts.note.textContent = course.selected ? '已加入学习计划' : '点击选择';
       // Move only rows whose position actually changed. Unchanged snapshots do
       // not replace focused checkbox nodes or restart their selection animation.
       if (container.children[index] !== node) container.insertBefore(node, container.children[index] || null);
@@ -629,7 +687,7 @@
     $('course-empty').hidden = Boolean(courses.length);
     if (!courses.length) {
       const filtered = s.courses.length > 0;
-      renderEmpty('course-empty', filtered ? 'search' : 'book', filtered ? '没有找到匹配课程' : s.account.logged_in ? '正在等待你的课程' : '连接你的学习账号', filtered ? '试试其他关键词，或切换课程筛选条件。' : asText(s.empty.courses) || '点击连接账号，在独立 Edge 窗口登录后，课程会自动出现。', filtered ? null : ['连接并读取课程', 'load_courses', 'arrow']);
+      renderEmpty('course-empty', filtered ? 'search' : 'book', filtered ? '没有找到匹配课程' : s.account.logged_in ? '暂无可选课程' : '账号登录', filtered ? '试试其他关键词，或切换课程筛选条件。' : asText(s.empty.courses) || '点击连接账号，在独立 Edge 窗口登录后，课程会自动出现。', filtered ? null : ['刷新课程', 'load_courses', 'arrow']);
     }
   }
 
@@ -720,7 +778,7 @@
     $('task-empty').hidden = Boolean(tasks.length);
     if (!tasks.length) {
       const filtered = s.tasks.length > 0, selected = s.counts.selected > 0;
-      renderEmpty('task-empty', filtered ? 'search' : 'list', filtered ? '当前筛选没有匹配任务' : selected ? '你的学习计划已准备好' : '先选课程，再轻松开始', filtered ? '尝试更换任务类型、关键词，或关闭“仅看未完成”。' : asText(s.empty.tasks) || '直接点击开始，工作台会扫描所选课程并安排可处理的任务。', filtered ? null : selected ? ['开始学习', 'primary', 'play'] : ['选择课程', 'navigate_courses', 'arrow']);
+      renderEmpty('task-empty', filtered ? 'search' : 'list', filtered ? '当前筛选没有匹配任务' : selected ? '尚无待处理任务' : '尚未选择课程', filtered ? '尝试更换任务类型、关键词，或关闭“仅看未完成”。' : asText(s.empty.tasks) || '直接点击开始，工作台会扫描所选课程并安排可处理的任务。', filtered ? null : selected ? ['开始学习', 'primary', 'play'] : ['选择课程', 'navigate_courses', 'arrow']);
     }
   }
 
@@ -941,6 +999,7 @@
     if (!pageNames[page] || page === ui.page) return;
     const oldPage = $('page-' + ui.page), nextPage = $('page-' + page), token = ++ui.navigationToken;
     ui.page = page;
+    if (ui.snapshot) renderHeader();
     // Hidden pages do not consume DOM work for every background snapshot.
     // Materialize their latest display data only when the user opens them.
     if (page === 'courses') renderCourses();
@@ -1088,6 +1147,17 @@
     const command = names[action] || [action, {}]; await sendAction(...command);
   }
 
+  // A short tap can finish between paints. Start release feedback on activation
+  // so mouse, touch and keyboard get the same spring without delaying actions.
+  document.addEventListener('click', event => {
+    const button = event.target.closest?.('button:not(:disabled,.window-control)');
+    if (!button || reduceMotion.matches || !event.isTrusted) return;
+    button.getAnimations().filter(a => a.id === 'button-release').forEach(a => a.cancel());
+    button.animate([
+      { scale: '.97 .92' }, { scale: '1.025 1.06', offset: .40 },
+      { scale: '.994 .985', offset: .68 }, { scale: '1' }
+    ], { id: 'button-release', duration: 340, easing: 'ease-out' });
+  }, true);
   document.addEventListener('click', (event) => {
     const tab = event.target.closest('[data-task-group]');
     if (tab) { taskGroup = tab.dataset.taskGroup; ui.taskType = 'all'; $('task-type').value = 'all'; renderTasks(true); return; }
@@ -1098,12 +1168,35 @@
     const page = event.target.closest('[data-page]'); if (page) { navigate(page.dataset.page); return; }
     const action = event.target.closest('[data-action]'); if (action && !action.disabled) { handleAction(action.dataset.action, action); return; }
     const courseFilter = event.target.closest('[data-course-filter]');
-    if (courseFilter) { ui.courseFilter = courseFilter.dataset.courseFilter; document.querySelectorAll('[data-course-filter]').forEach((node) => node.classList.toggle('is-active', node === courseFilter)); renderCourses(); return; }
+    if (courseFilter) {
+      ui.courseFilter = courseFilter.dataset.courseFilter;
+      document.querySelectorAll('[data-course-filter]').forEach(node => {
+        const active = node === courseFilter;
+        node.classList.toggle('is-active', active);
+        node.setAttribute('aria-pressed', String(active));
+      });
+      renderCourses();
+      return;
+    }
     const activity = event.target.closest('[data-activity-tab]');
     if (activity) { ui.activityTab = activity.dataset.activityTab; document.querySelectorAll('[data-activity-tab]').forEach((node) => node.classList.toggle('is-active', node === activity)); renderActivity(); return; }
     const history = event.target.closest('[data-site-url]'); if (history && !history.disabled) { $('site-url').value = history.dataset.siteUrl; setText('site-error', ''); $('site-url').focus(); return; }
     if (event.target === $('settings-overlay')) closeSettings();
     if (!event.target.closest('.hero-actions')) closeMenu();
+  });
+  const bulkSelect = document.querySelector('.bulk-select');
+  $('course-year').addEventListener('change', event => {
+    selectedYear = event.target.value;
+    renderCourses(true);
+  });
+  document.addEventListener('click', event => {
+    if (bulkSelect.open && (!bulkSelect.contains(event.target) || event.target.closest('.filter-actions button'))) bulkSelect.open = false;
+  }, true);
+  bulkSelect.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      bulkSelect.open = false;
+      bulkSelect.querySelector('summary').focus();
+    }
   });
   $('primary-button').addEventListener('click', () => sendAction('primary'));
   $('browser-address-form').addEventListener('submit', event => {

@@ -9,7 +9,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from pathlib import Path
 from urllib.parse import urlsplit
-from core.courses import course_state, date_text
+from core.courses import course_state, date_text, timestamp
 from core.task_types import type_label
 from core.sites import PRESETS, normalize_site, read_sites, save_site, site_config, prepare_site
 from gui.glass import GlassBackdrop, GlassButton, INK, MUTED, PANEL, BLUE
@@ -31,7 +31,7 @@ class Interface:
         self.progress_animating = False
         self._notice_until = 0
         self._demo_running = False
-        self._page = 'tasks' if store.selected_courses() else 'courses'
+        self._page = 'tasks' if store.available_selection() else 'courses'
         self._site_dialog = None
         self._refresh_job = None
         root.title('雨课堂 · 智能任务管理助手' + ('  [演示界面]' if demo else ''))
@@ -393,12 +393,12 @@ class Interface:
             self.command('paused')
         elif self.store.get('worker_busy', False):
             self.notice('正在暂停，请稍候…')
-        elif not self.store.get('account', {}).get('id') or not self.store.catalog():
+        elif not self.store.get('account', {}).get('id') or not self.store.available_catalog():
             # Cancelling a login wait can leave no selectable courses yet.
             # The same primary button must reconnect instead of dead-ending at
             # an empty selection page.
             self.command('catalog')
-        elif not self.store.selected_courses():
+        elif not self.store.available_selection():
             self.show_page('courses')
             self.notice('先勾选要处理的课程，再点击“开始任务”。选择会自动保存。')
         else:
@@ -493,14 +493,14 @@ class Interface:
         self.render_primary()
 
     def toggle_course(self, cid):
-        if not cid or cid not in {c['classroom_id'] for c in self.store.catalog()}:
+        if not cid or cid not in {c['classroom_id'] for c in self.store.available_catalog()}:
             return
-        selected = set(self.store.selected_courses())
+        selected = set(self.store.available_selection())
         selected.symmetric_difference_update({cid})
         self.save_selection(selected)
 
     def select_group(self, mode):
-        courses = self.store.catalog()
+        courses = self.store.available_catalog()
         selected = [c['classroom_id'] for c in courses
                     if mode == 'all' or (mode == 'current' and course_state(c) == '进行中')]
         self.save_selection(selected)
@@ -508,8 +508,8 @@ class Interface:
     def render_courses(self):
         if not hasattr(self, 'course_tree'):
             return
-        courses = sorted(self.store.catalog(), key=lambda c: (c.get('start') or 0, c['classroom_id']), reverse=True)
-        selected = set(self.store.selected_courses())
+        courses = sorted(self.store.available_catalog(), key=lambda c: (timestamp(c.get('start')) or 0, c['classroom_id']), reverse=True)
+        selected = set(self.store.available_selection())
         query = self.course_search.get().strip().casefold()
         visible = [c for c in courses if not query or query in ' '.join(str(c.get(k, '')) for k in
                    ('name', 'class_name', 'term')).casefold()]
@@ -574,7 +574,7 @@ class Interface:
         if visible:
             self.task_empty.place_forget()
         else:
-            if not self.store.selected_courses():
+            if not self.store.available_selection():
                 text = '先选好课程\n\n点击“选择课程”，勾选需要处理的课程。'
             elif not self.store.scope_scanned():
                 text = '准备好就开始\n\n点击“开始任务”，会先扫描所选课程，再执行任务。'
@@ -608,7 +608,7 @@ class Interface:
         if desired != 'paused' and self.controls_busy():
             self.notice('当前操作尚未停止，请先暂停后稍候。')
             return
-        if desired in ('scan', 'run') and not self.store.selected_courses():
+        if desired in ('scan', 'run') and not self.store.available_selection():
             self.show_page('courses')
             self.notice('还未选择课程。请勾选要处理的课程，然后点击开始。')
             return
@@ -644,9 +644,9 @@ class Interface:
             text, disabled = '暂停', False
         elif busy:
             text, disabled = '正在暂停…', True
-        elif not self.store.get('account', {}).get('id') or not self.store.catalog():
+        elif not self.store.get('account', {}).get('id') or not self.store.available_catalog():
             text, disabled = '载入课程', False
-        elif desired == 'paused' and self.store.selected_courses():
+        elif desired == 'paused' and self.store.available_selection():
             text, disabled = '继续', False
         else:
             text, disabled = '开始任务', False
@@ -726,9 +726,9 @@ class Interface:
         try:
             account = self.store.get('account', {})
             tasks = self.store.scoped_rows()
-            selected = self.store.selected_courses()
+            selected = self.store.available_selection()
             done = sum(t['state'] == 'completed' for t in tasks)
-            self.summary.configure(text=f"账号：{account.get('name', '等待登录')}    课程：{self.store.get('course_count', 0)}"
+            self.summary.configure(text=f"账号：{account.get('name', '等待登录')}    课程：{len(self.store.available_catalog())}"
                                         f'（已选 {len(selected)}）    任务：{len(tasks)}    已确认：{done}    待处理：{len(tasks)-done}')
             for (_, value, _), number in zip(self.metrics, (len(selected), len(tasks), done)):
                 self.backdrop.itemconfigure(value, text=str(number))

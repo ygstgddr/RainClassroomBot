@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 
 from core.errors import LoginRequired
+from core.courses import window_reason, timestamp
 
 
 async def scan_assessments(adapter, store, concurrency):
@@ -31,6 +32,10 @@ async def scan_assessments(adapter, store, concurrency):
                 report['failed'].append(course['name'][:200])
             else:
                 if active():
+                    dates = getattr(adapter, 'course_dates', {}).get(course['classroom_id']) or course
+                    def bound(task_value, course_value, combine):
+                        values = [v for raw in (task_value, course_value) if (v := timestamp(raw))]
+                        return combine(values, default=None)
                     # No signed URL, response body, or answers in the inventory.
                     report['tasks'].extend({
                         'id': f"{task['classroom_id']}:{task['leaf_id']}",
@@ -38,8 +43,9 @@ async def scan_assessments(adapter, store, concurrency):
                         'title': task['title'][:300],
                         'kind': task['kind'],
                         'state': task['state'],
-                        'deadline': task['deadline'],
-                    } for task in tasks)
+                        'available_from': bound(task.get('available_from'), dates.get('start'), max),
+                        'deadline': bound(task.get('deadline'), dates.get('end'), min),
+                    } for task in tasks if not window_reason(dates, task))
             report['finished'] += 1
             publish()
 
@@ -49,7 +55,9 @@ async def scan_assessments(adapter, store, concurrency):
         account = await adapter.account()
         if account['id'] != report['account']:
             raise LoginRequired('当前登录账号已变化')
-        courses = await adapter.courses()
+        cached = {str(c['classroom_id']): c for c in store.catalog(account['id'])}
+        courses = [course for course in await adapter.courses()
+                   if not window_reason(cached.get(course['classroom_id']) or course)]
         if active():
             report['courses'] = len(courses)
             publish()
@@ -105,7 +113,8 @@ async def open_assessment(adapter, browser, store):
         if not all(value.isascii() and value.isdecimal() for value in (classroom_id, leaf_id)):
             return resume
         tasks = await adapter.scan_course({'classroom_id': classroom_id, 'name': ''}, assessments_only=True)
-        matches = [item for item in tasks if item['leaf_id'] == leaf_id]
+        matches = [item for item in tasks if item['leaf_id'] == leaf_id
+                   and not window_reason(getattr(adapter, 'course_dates', {}).get(classroom_id), item)]
         if len(matches) != 1 or matches[0]['state'] in ('locked', 'completed') or not allowed():
             result['message'] = '任务状态已变化，请重新扫描。'
             return resume
