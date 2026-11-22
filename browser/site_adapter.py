@@ -9,6 +9,7 @@ import time
 from urllib.parse import urlparse
 from core.errors import LoginRequired, AdaptationRequired, RetryableError
 from core.courses import timestamp, window_reason
+from browser.assessment_metadata import requires_file
 from core.task_types import task_kind, AUTOMATED_KINDS, manual_note
 
 
@@ -267,6 +268,16 @@ class SiteAdapter:
                               leaf_type=typ, kind=kind, state=state, progress=progress,
                               **window, duration=None, note=note,
                               evidence=self.evidence(cid, lid, schedules[lid]) if done else ''))
+            if assessments_only:
+                extra = leaf.get('exam')
+                tasks[-1]['open_work'] = leaf.get('is_open_type') is True and leaf.get('open_exercise_type_label') == 7
+                extra = extra if isinstance(extra, dict) else {}
+                tasks[-1]['requires_file'] = (leaf.get('require_upload') is True
+                    or leaf.get('submission_type') in ('file', 'attachment')
+                    or requires_file(str(leaf.get('name') or '')))
+                minutes = extra.get('duration_minutes', leaf.get('duration_minutes'))
+                if type(minutes) in (float, int) and minutes > 0:
+                    tasks[-1]['time_limit'] = f'{minutes:g} 分钟'
         return tasks
 
     def evidence(self, cid, lid, value):

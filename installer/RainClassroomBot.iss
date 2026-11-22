@@ -6,7 +6,7 @@
   #define OutputDir "..\dist\installer"
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.8.10"
+  #define AppVersion "0.8.11"
 #endif
 
 [Setup]

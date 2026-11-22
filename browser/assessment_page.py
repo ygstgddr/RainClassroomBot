@@ -2,6 +2,7 @@
 import json
 import re
 import time
+from browser.assessment_metadata import FILE_REQUIREMENT, OPTIONAL_FILE
 from browser.assessment_route import EXAM_ORIGIN
 
 
@@ -28,12 +29,42 @@ _DOM_SCRIPT = r"""
     .replace(/(?:[./][^\s<>"'，。；）】]*)[?#][^\s<>"'，。；）】]*/gu, '[链接]')
     .replace(/[?#][\w.%+-]+=[^\s<>"'，。；）】]*/gu, '[链接]');
   const cleanText = value => stripQueries(value).replace(/\s+/gu, ' ').trim();
-  const text = (el, limit, excludeLabels = false) => {
+  // Word pastes can leave a spacer pointing to a file on the author's PC.
+  // Only tolerate it in a labelled header above a complete, readable data column.
+  const wordHeaderPlaceholder = img => {
+    if (!img.matches('img[word_img]') || !/^file:\/\//i.test(img.getAttribute('word_img')) ||
+        !/\/ueditor\/themes\/default\/images\/spacer\.gif$/i.test(img.getAttribute('src') || '')) return false;
+    const cell = img.closest('td,th'), table = cell?.closest('table');
+    if (!table || !cell.innerText.trim() || cell.parentElement !== table.rows[0] || table.rows.length < 2) return false;
+    const col = cell.cellIndex, width = table.rows[0].cells.length;
+    return Array.from(table.rows).every(row => row.cells.length === width &&
+      Array.from(row.cells).every(c => c.colSpan === 1 && c.rowSpan === 1) &&
+      visible(row.cells[col]) && row.cells[col].innerText.trim());
+  };
+  const text = (el, limit, excludeLabels = false, blanks = null, tables = false) => {
     if (!el || el.closest(excluded)) return '';
-    const walker = el.ownerDocument.createTreeWalker(el, 4);
+    const walker = el.ownerDocument.createTreeWalker(el, blanks || tables || el.querySelector('img[word_img]') ? 5 : 4);
     const parts = [];
     let length = 0;
     for (let n = 0, node; n < 4000 && (node = walker.nextNode()); n++) {
+      if (tables && node.parentElement?.closest('table') && el.contains(node.parentElement.closest('table'))) continue;
+      if (node.nodeType === 1) {
+        if (tables && node.matches('table') && visible(node) && !node.closest(excluded)) {
+          for (const row of node.rows) {
+            if (!visible(row)) continue;
+            const cells = Array.from(row.cells, cell => text(cell, limit, excludeLabels, blanks));
+            const line = cells.join(' | ');
+            parts.push('\n' + line);
+            length += line.length + 1;
+            if (length > limit) break;
+          }
+          if (length > limit) break;
+          parts.push('\n');
+        } else if (node.matches('img[word_img]') && wordHeaderPlaceholder(node)) {
+          parts.push('〔原符号未显示〕');
+        } else if (blanks?.has(node)) parts.push('【空' + blanks.get(node) + '】');
+        continue;
+      }
       const parent = node.parentElement;
       if (!parent || parent.closest(excluded) || (excludeLabels && parent.closest('label')) || !visible(parent)) continue;
       const link = parent.closest('a[href]');
@@ -47,25 +78,36 @@ _DOM_SCRIPT = r"""
     }
     return parts.join(' ').slice(0, limit + 1);
   };
-  const stemText = el => el && !el.closest(excluded) && !el.querySelector(excluded + ', a[href]') &&
+  const stemText = el => el?.querySelector('table') ? text(el, 4000, false, null, true) : el && !el.closest(excluded) && !el.querySelector(excluded + ', a[href]') &&
     typeof el.innerText === 'string' ? stripQueries(el.innerText.slice(0, 4100)).trim().slice(0, 4001) : text(el, 4000);
+  const fillStem = (stem, controls) => {
+    if (!stem || !controls.some(el => stem.contains(el))) return stemText(stem);
+    const blanks = new Map(controls.map((el, index) => [el, index + 1]));
+    return text(stem, 4000, false, blanks);
+  };
   const media = el => Boolean(el?.querySelector('img, svg, canvas, math, video, audio'));
-  const questionsSelector = '[data-question-id], fieldset' + (request.exam ? ', section.subject-item' : '');
+  const questionsSelector = '[data-question-id], fieldset' + (request.exam ? ', .subject-item' : '');
   const stemsSelector = '[data-question-stem], [data-role="question-stem"], .question-stem, .question-title, legend' +
     (request.exam ? ', .item-body > h4.exam-font' : '');
-  const formSelector = 'input:not([type=hidden]), textarea, select, [contenteditable=true], [role=radio], [role=checkbox], [role=textbox]';
+  const editable = '[contenteditable=true], [contenteditable=""], [contenteditable=plaintext-only]';
+  const formSelector = 'input:not([type=hidden]), textarea, select, [role=radio], [role=checkbox], [role=textbox], ' + editable;
   const buttonSelector = 'button, [role=button], input[type=button], input[type=submit], input[type=reset], input[type=image]';
   const actionSelector = buttonSelector + ', a[href]';
   const label = el => [...(el.labels || [])].find(visible);
   const shown = el => visible(el) || Boolean(label(el));
   const kindOf = el => {
+    if (el.matches(editable) && el.isContentEditable) return 'text';
     if (el.tagName === 'TEXTAREA') return 'textarea';
     if (el.tagName === 'INPUT') return el.type;
     return el.getAttribute('role') || el.tagName.toLowerCase();
   };
   const available = el => el.isConnected && shown(el) && !el.matches(':disabled, [readonly]') &&
     !el.closest('[inert], [aria-disabled=true], [aria-hidden=true]');
-  const answerControls = root => [...root.querySelectorAll(formSelector)].filter(el =>
+  const answerControls = root => [...root.querySelectorAll(formSelector + ', .ueditor-content iframe, .edui-editor-iframeholder iframe')].map(el => {
+    if (el.tagName !== 'IFRAME') return el;
+    const body = el.contentDocument?.body;
+    return visible(el) && body?.matches(editable) && body.isContentEditable ? body : null;
+  }).filter(el => el && el.type !== 'file' &&
     shown(el) && !['button', 'submit', 'reset', 'image'].includes(kindOf(el)) &&
     !(el.matches('[role=radio], [role=checkbox]') && el.querySelector('input[type=radio], input[type=checkbox]')));
   const docs = [document];
@@ -127,7 +169,7 @@ _DOM_SCRIPT = r"""
   const sameControls = (left, right) =>
     left.length === right.length && left.every(control => right.includes(control));
   const examRadioComponents = (root, controls) => {
-    if (!request.exam || !root.matches('section.subject-item') || controls.length < 2) return null;
+    if (!request.exam || !root.matches('.subject-item') || controls.length < 2) return null;
     const radios = controls.map(el => {
       const wrapper = el.closest('label.el-radio[role=radio]');
       const vm = wrapper?.__vue__;
@@ -137,7 +179,9 @@ _DOM_SCRIPT = r"""
     return radios.every(vm => vm && vm.$parent === radios[0].$parent) &&
       new Set(radios.map(vm => vm.label)).size === radios.length ? radios : null;
   };
-  const classify = (root, stem, stemNode, controls, id, adapted = false) => {
+  // UEditor renders an untouched answer as <p>zero-width space<br></p>.
+  const readValue = el => el.isContentEditable ? (el.innerText || '').replace(/^[\u200b\ufeff]+|[\u200b\ufeff]+$/g,'').replace(/\r\n?/g,'\n').trimEnd() : el.value;
+  const classify = (root, stem, stemNode, controls, id, adapted = false, slot = null) => {
     const options = [];
     const issues = [];
     let kind = '';
@@ -155,24 +199,27 @@ _DOM_SCRIPT = r"""
         if (!option || media(label(el))) issues.push('选项缺少可读文字或包含图片');
         options.push({id: String(options.length + 1), text: option});
       }
-    } else if (controls.length === 1 && (controls[0].tagName === 'TEXTAREA' ||
-               (controls[0].tagName === 'INPUT' && type === 'text'))) {
+    } else if (controls.length === 1 && ['text','textarea'].includes(type)) {
       kind = 'text';
     } else {
       issues.push('题型或控件尚未适配');
     }
-    if (media(stemNode) || root.querySelector('img, canvas, math, video, audio')) {
+    const unresolved = [...root.querySelectorAll('img, canvas, math, video, audio')].some(node =>
+      !(stemNode?.contains(node) && wordHeaderPlaceholder(node)));
+    if (unresolved || stemNode?.querySelector('svg')) {
       issues.push('需要核对图片、公式或其他媒体');
     }
-    const question = {id, kind, stem, options, issues};
-    if (request.exam && root.matches('section.subject-item')) {
+    const question = {id, kind, stem: slot ? stem + ' 【第 ' + (slot.index + 1) + ' / ' + slot.total + ' 空】' : stem, options, issues};
+    if (kind === 'text' && !slot && (controls[0].tagName === 'TEXTAREA' || controls[0].isContentEditable))
+      question.response_mode = 'written';
+    if (request.exam && root.matches('.subject-item')) {
       const passage = [...root.parentElement.children].find(el => el.matches('.dict_description') && visible(el));
       if (passage) {
         question.material = text(passage, 12000);
         if (!question.material || media(passage)) issues.push('共享阅读材料需要核对');
       }
     }
-    return {question, controls, root, stemNode, adapted, examRadios,
+    return {question, controls, root, stemNode, adapted, examRadios, slot,
       identity: [groupId(root), stemNode && nodeId(stemNode), controls.map(controlId)]};
   };
 
@@ -217,9 +264,14 @@ _DOM_SCRIPT = r"""
         const stem = [...root.querySelectorAll(stemsSelector)].find(visible);
         if (!stem && !root.hasAttribute('data-question-id')) continue;
         const controls = answerControls(root);
-        if (request.exam && root.matches('section.subject-item') && !controls.length) continue;
-        if (rows.length === 80) return {rows, truncated: true};
-        rows.push(classify(root, stemText(stem), stem || null, controls, String(rows.length + 1)));
+        if (request.exam && root.matches('.subject-item') && !controls.length) continue;
+        const split = controls.length > 1 && controls.every(el => ['text','textarea'].includes(kindOf(el)));
+        const prompt = split ? fillStem(stem, controls) : stemText(stem);
+        for (const [index, group] of (split ? controls.map(el => [el]) : [controls]).entries()) {
+          if (rows.length === 80) return {rows, truncated: true};
+          rows.push(classify(root, prompt, stem || null, group, String(rows.length + 1),
+            false, split ? {index, total:controls.length} : null));
+        }
       }
     }
     return {rows, truncated: false};
@@ -229,6 +281,15 @@ _DOM_SCRIPT = r"""
     truncated: result.truncated, unreadableFrames,
   });
 
+  const fileRequirement = new RegExp(request.fileRequirement, 'i');
+  const optionalFile = new RegExp(request.optionalFile, 'gi');
+  const fileRequired = docs.some(doc => doc.querySelector('input[type=file][required]:not(:disabled)') ||
+    [...doc.querySelectorAll(questionsSelector + ', .homework-description, .assignment-instructions, .homework-content')].some(el => visible(el) &&
+      (fileRequirement.test(text(el,4000).replace(optionalFile, '')) ||
+       (el.querySelector('input[type=file]') && /上传|提交附件/.test(text(el,4000)) &&
+        !answerControls(el).some(c => ['text','textarea','radio','checkbox'].includes(kindOf(c)))))));
+  if (request.mode === 'eligibility') return {requires_file: fileRequired};
+  if (fileRequired) return {error:'此任务要求提交文件，请手动完成。'};
   if (request.mode === 'surface') return observe();
   if (request.mode === 'fill' && Date.now() > request.deadline) return {error: '填写请求已超时，请重新确认。'};
   const current = scan(request.proposals);
@@ -259,7 +320,7 @@ _DOM_SCRIPT = r"""
     const filled = current.rows.filter(row => {
       const answer = request.answers[row.question.id];
       if (row.question.issues.length || !Object.hasOwn(request.answers, row.question.id)) return false;
-      if (row.question.kind === 'text') return row.controls.length === 1 && row.controls[0].value === answer;
+      if (row.question.kind === 'text') return row.controls.length === 1 && readValue(row.controls[0]) === answer;
       const selected = row.examRadios ? row.examRadios.map(vm => vm.model === vm.label) : row.controls.map(el => el.checked);
       const choices = Array.isArray(answer) ? answer : [answer];
       return choices.length > 0 && choices.every(id => row.question.options.some(option => option.id === id)) &&
@@ -274,7 +335,7 @@ _DOM_SCRIPT = r"""
   const plans = [];
   const valuesOf = (row, property) => property === 'exam-radio'
     ? row.examRadios.map(vm => vm.model === vm.label)
-    : row.controls.map(el => el[property]);
+    : row.controls.map(el => property === 'value' ? readValue(el) : el[property]);
   const plan = (row, property, values) => {
     const id = row.question.id;
     const original = valuesOf(row, property);
@@ -317,9 +378,10 @@ _DOM_SCRIPT = r"""
       continue;
     }
     const {controls, root, question, stemNode, adapted} = row;
-    const liveControls = answerControls(root);
-    const liveStem = adapted ? question.stem : stemText(stemNode);
-    const live = classify(root, liveStem, stemNode, liveControls, id, adapted);
+    const allControls = answerControls(root);
+    const liveControls = row.slot ? allControls.slice(row.slot.index, row.slot.index+1) : allControls;
+    const liveStem = adapted ? question.stem : row.slot ? fillStem(stemNode, allControls) : stemText(stemNode);
+    const live = classify(root, liveStem, stemNode, liveControls, id, adapted, row.slot);
     if (controls.some(el => !available(el)) || liveControls.length !== controls.length ||
         liveControls.some((el, index) => el !== controls[index]) ||
         (stemNode && (!stemNode.isConnected || !root.contains(stemNode) || !visible(stemNode))) ||
@@ -357,6 +419,21 @@ _DOM_SCRIPT = r"""
       for (const [index, el] of controls.entries()) {
         if (currentValues[index] === values[index]) continue;
         const view = el.ownerDocument.defaultView;
+        if (el.isContentEditable) {
+          el.focus();
+          if (el.querySelector('img,video,table')) throw new Error('编辑器已有内容');
+          const lines = values[index].split('\n');
+          for (const [lineIndex, line] of lines.entries()) {
+            if (lineIndex && !el.ownerDocument.execCommand('insertLineBreak', false))
+              throw new Error('编辑器未接受换行');
+            if (line && !el.ownerDocument.execCommand('insertText', false, line))
+              throw new Error('编辑器未接受文字');
+          }
+          el.dispatchEvent(new view.KeyboardEvent('keyup', {bubbles:true}));
+          el.blur();
+          changed.push(el);
+          continue;
+        }
         const proto = el.tagName === 'TEXTAREA' ? view.HTMLTextAreaElement.prototype : view.HTMLInputElement.prototype;
         Object.getOwnPropertyDescriptor(proto, property).set.call(el, values[index]);
         changed.push(el);
@@ -367,7 +444,10 @@ _DOM_SCRIPT = r"""
         el.dispatchEvent(new Event('input', {bubbles: true, composed: true}));
         if (el.isConnected) el.dispatchEvent(new Event('change', {bubbles: true}));
       }
-      if (controls.every((el, index) => el.isConnected && el[property] === values[index])) filled.push(id);
+      if (controls.every((el, index) => el.isConnected && (property === 'value' ? readValue(el) : el[property]) === values[index])) {
+        if (property === 'value' && controls[0].isContentEditable) pending[id] = values[0];
+        else filled.push(id);
+      }
       else errors[id] = '页面未保留全部答案，请人工核对。';
     } catch {
       errors[id] = '答题控件未确认写入，请人工核对。';
@@ -380,7 +460,8 @@ _UNREADABLE = re.compile(r'[\ue000-\uf8ff\ufffd\U000f0000-\U0010fffd]|(?:锟斤�
 
 
 def _script(origin, registry, mode, **options):
-    request = json.dumps(dict(origin=origin, registry=registry, mode=mode, exam=origin == EXAM_ORIGIN, **options))
+    request = json.dumps(dict(origin=origin, registry=registry, mode=mode, exam=origin == EXAM_ORIGIN,
+                              fileRequirement=FILE_REQUIREMENT, optionalFile=OPTIONAL_FILE, **options))
     return f'(() => {{ const request = {request}; return ({_DOM_SCRIPT}); }})()'
 
 
@@ -390,6 +471,10 @@ def question_script(origin, registry='_rain_assessment_v1', proposals=None):
 
 def surface_script(origin, registry):
     return _script(origin, registry, 'surface')
+
+
+def eligibility_script(origin, registry):
+    return _script(origin, registry, 'eligibility')
 
 
 def fill_script(origin, registry, proposals, expected, answers):

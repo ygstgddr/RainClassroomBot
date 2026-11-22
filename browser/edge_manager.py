@@ -5,6 +5,8 @@ from urllib.parse import urlsplit
 from playwright.async_api import ElementHandle, async_playwright
 from core.errors import AdaptationRequired, Interrupted, LoginRequired
 from browser.assessment_route import EXAM_ORIGIN, assessment_origin
+from browser.assessment_metadata import landing_details, requires_file
+from core.courses import window_reason
 from browser.visibility import visible_security_challenge
 
 
@@ -214,6 +216,15 @@ class EdgeManager:
         raise AdaptationRequired('课程页未找到唯一可见的任务入口；已核对任务 ID 与名称，请检查章节折叠状态或页面变化')
 
     async def open_task(self, task, *, entry_allowed=None):
+        if task.get('open_work') and entry_allowed is not None:
+            if not entry_allowed():
+                raise Interrupted()
+            cid, leaf = str(task['classroom_id']), str(task['leaf_id'])
+            if not re.fullmatch(r'[0-9]+', cid) or not re.fullmatch(r'[0-9]+', leaf):
+                raise AdaptationRequired('开放型作业的课程或任务编号无效')
+            await self.page.goto(f"{self.config['base_url']}/ai-workspace/lms-graph/{cid}/exercise/{leaf}",
+                                 wait_until='domcontentloaded')
+            return self.page
         if task['kind'] == 'slides' and task.get('_slides_path'):
             await self.page.goto(self.config['base_url'] + task['_slides_path'], wait_until='domcontentloaded')
             return self.page
@@ -247,10 +258,17 @@ class EdgeManager:
 
     async def start_assessment(self, task, course_url, allowed):
         """Start only a unique control on the selected assessment's landing page."""
+        if task.get('open_work'):
+            from browser.open_work import open_chat
+            self.assessment_details = {}
+            return await open_chat(self.page, self.page.url, self.config['base_url'],
+                                   lambda: not allowed(), expected=True) is not None
         course_path = urlsplit(course_url).path
-        start_name = re.compile(r'^(开始考试|开始测验|开始答题|开始作答|开始练习|进入考试|进入答题)$')
-        deadline = asyncio.get_running_loop().time() + 12
-        clicked = False
+        start_name = re.compile(r'^\s*(?:(?:我已阅读并)?同意并?|确认)?(?:开始|进入|继续)(?:考试|测验|答题|作答|练习)\s*$')
+        deadline = asyncio.get_running_loop().time() + 20
+        clicked = set()
+        exam_id = None
+        self.assessment_details = {}
         while allowed() and asyncio.get_running_loop().time() < deadline:
             starts = []
             at_course = urlsplit(self.page.url).path in (course_path, f"/v2/web/studentLog/{task.get('classroom_id', '')}")
@@ -258,6 +276,8 @@ class EdgeManager:
             if top_origin is None:
                 await asyncio.sleep(.2)
                 continue
+            if top_origin == EXAM_ORIGIN and exam_id and urlsplit(self.page.url).path.rstrip('/').split('/')[-1] != exam_id:
+                return False
             for frame in self.page.frames:
                 if assessment_origin(frame.url, self.config['base_url']) != top_origin:
                     continue
@@ -269,19 +289,63 @@ class EdgeManager:
                 surface = frame.get_by_role('dialog') if at_course else frame
                 titles = surface.get_by_text(task['title'], exact=True)
                 has_title = any([await title.is_visible() for title in await titles.all()])
+                route = re.fullmatch(r'/v2/web/iframe-quiz/(\d+)/(\d+)/?', urlsplit(frame.url).path)
+                if route and has_title and route[1] == str(task.get('classroom_id')):
+                    exam_id = route[2]
                 if top_origin == EXAM_ORIGIN and not has_title and not clicked:
                     continue
                 questions = surface.locator('[data-question-id], fieldset, .subject-item')
+                if await surface.locator('input[type=file][required]').count():
+                    self.assessment_details['requires_file'] = True
+                    return False
+                ready = False
                 for question in await questions.all():
-                    if await question.is_visible() and await question.locator('input:not([type=hidden]), textarea').count():
-                        return True
-                if clicked or not has_title:
+                    if not await question.is_visible():
+                        continue
+                    prompt = await question.inner_text()
+                    if requires_file(prompt):
+                        self.assessment_details['requires_file'] = True
+                        return False
+                    # Exam terms are sometimes a fieldset containing a single checkbox.
+                    if await question.evaluate("el => el.matches('fieldset')") and re.search(
+                            r'我已阅读|考试须知|考试协议|诚信承诺|考试条款', prompt):
+                        continue
+                    controls = question.locator('input:not([type=hidden]):not([type=file]), textarea, '
+                                                '[contenteditable=true], [contenteditable=plaintext-only], .edui-editor-iframeholder iframe')
+                    if await controls.count():
+                        ready = True
+                if ready:
+                    return True
+                in_exam_flow = clicked and top_origin == EXAM_ORIGIN and exam_id
+                if not has_title and not in_exam_flow:
                     continue
-                starts.extend([button for button in await surface.get_by_role('button', name=start_name).all()
-                               if await button.is_visible() and await button.is_enabled()])
+                body = await surface.locator('body').inner_text() if surface is frame else await surface.first.inner_text()
+                self.assessment_details.update(landing_details(body))
+                if window_reason(None, {'deadline': self.assessment_details.get('task_deadline')}):
+                    return False
+                if self.assessment_details.get('requires_file'):
+                    return False
+                if re.search(r'考生须知|考试须知|考试协议|诚信|考试条款', body):
+                    consent = re.compile(r'已阅读|我同意|我已|本人.*同意|接受.*(条款|协议)|同意.*(条款|协议|条约|公约)')
+                    labels = surface.locator('label').filter(has_text=consent)
+                    if await labels.count() == 1 and await labels.is_visible():
+                        check = labels.locator('input[type=checkbox]')
+                        if await check.count() == 1 and allowed() and not await check.is_checked():
+                            await labels.click(timeout=2000)
+                    else:
+                        agrees = surface.get_by_role('checkbox', name=consent)
+                        if await agrees.count() == 1 and allowed() and not await agrees.is_checked():
+                            await agrees.check(timeout=2000)
+                candidates = surface.get_by_role('button', name=start_name).or_(
+                    surface.locator('.btn-quiz .linkkk, a').filter(has_text=start_name))
+                for button in await candidates.all():
+                    key = (frame.url, (await button.inner_text()).strip())
+                    if key not in clicked and await button.is_visible() and await button.is_enabled():
+                        starts.append((button, key))
             if len(starts) == 1 and allowed():
-                await starts[0].click(timeout=3000)
-                clicked = True
+                button, key = starts[0]
+                await button.click(timeout=3000)
+                clicked.add(key)
             elif len(starts) > 1:
                 return False
             await asyncio.sleep(.2)

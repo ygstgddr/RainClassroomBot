@@ -132,9 +132,9 @@
                 <div id="assessment-task-view" class="assessment-task-view" hidden>
                   <div class="assessment-task-toolbar">
                     <div><h4>待办任务</h4><p id="assessment-progress" role="status"></p></div>
-                    <div class="assessment-actions"><button id="assessment-scan" class="glass-button compact-button" data-action="assessment_scan" type="button"><svg class="icon"><use href="#i-refresh"/></svg>扫描任务</button><button id="assessment-review" class="text-button" data-action="assessment_run_current" type="button">完整执行当前题页</button></div>
+                    <div class="assessment-actions"><button id="assessment-scan" class="glass-button compact-button" data-action="assessment_scan" type="button"><svg class="icon"><use href="#i-refresh"/></svg>扫描任务</button><button id="assessment-review" class="text-button" data-action="assessment_run_current" type="button">填写当前题页</button></div>
                   </div>
-                  <p class="assessment-authorization"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg>执行时可能开始计时，核对后自动提交。</p>
+                  <p class="assessment-authorization"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg>进入后可能开始计时。填写后由你检查并交卷。</p>
                   <div id="assessment-task-feed" class="assessment-task-feed">
                     <details id="assessment-summary-details" class="assessment-summary" hidden>
                       <summary id="assessment-summary-title">扫描详情</summary>
@@ -149,22 +149,22 @@
                   </div>
                 </div>
                 <footer id="assessment-dock" class="assessment-dock" hidden>
-                  <div class="assessment-run-bar"><button id="assessment-read-started" class="glass-button compact-button" data-action="assessment_run_current" type="button" title="自动填写、核对并提交" hidden><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg>完整执行当前题页</button><button id="assessment-cancel" class="text-button" data-action="assessment_cancel" type="button" hidden><svg class="icon"><use href="#i-stop"/></svg>停止</button></div>
+                  <div class="assessment-run-bar"><button id="assessment-read-started" class="glass-button compact-button" data-action="assessment_run_current" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg><span id="assessment-run-label">填写当前题页</span></button><button id="assessment-cancel" class="text-button" data-action="assessment_cancel" type="button" hidden><svg class="icon"><use href="#i-stop"/></svg>停止</button><span id="assessment-usage" class="assessment-usage" tabindex="0" hidden></span></div>
                   <div class="assessment-composer">
                     <form id="assessment-chat-form"><textarea id="assessment-chat-input" rows="2" maxlength="6000" placeholder="发消息给 DeepSeek…" aria-label="发消息给 DeepSeek" spellcheck="false"></textarea></form>
                     <div class="assessment-composer-tools">
                       <div class="assessment-composer-options">
                         <div id="assessment-model-control" class="assessment-model-control">
                           <input id="assessment-model" type="hidden" value="deepseek-flash">
-                          <button id="assessment-model-toggle" class="assessment-model-toggle" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="assessment-model-menu" aria-label="选择模型：Flash"><span id="assessment-model-current">Flash</span><span aria-hidden="true">⌄</span></button>
+                          <button id="assessment-model-toggle" class="assessment-model-toggle" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="assessment-model-menu" aria-label="选择模型：Flash"><span id="assessment-model-current">Flash</span><svg class="icon assessment-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></button>
                           <div id="assessment-model-menu" class="assessment-model-menu" role="menu" aria-label="DeepSeek 模型" hidden>
                             <div class="assessment-model-heading" role="presentation">选择模型</div>
-                            <button type="button" role="menuitemradio" aria-checked="true" tabindex="-1" data-assessment-model="deepseek-flash"><span class="assessment-model-symbol" aria-hidden="true">ϟ</span><span class="assessment-model-description"><strong>Flash</strong><small>日常对话与快速分析</small></span><span class="assessment-model-check" aria-hidden="true">✓</span></button>
-                            <button type="button" role="menuitemradio" aria-checked="false" tabindex="-1" data-assessment-model="deepseek-v4-pro"><span class="assessment-model-symbol is-pro" aria-hidden="true">✧</span><span class="assessment-model-description"><strong>V4 Pro</strong><small>深入分析 · 支持联网搜索</small></span><span class="assessment-model-check" aria-hidden="true">✓</span></button>
+                            <button type="button" role="menuitemradio" aria-checked="true" tabindex="-1" data-assessment-model="deepseek-flash"><span class="assessment-model-symbol" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M14 3 5 14h6l-1 7 9-12h-6z"/></svg></span><span class="assessment-model-description"><strong>Flash</strong><small>日常对话与快速分析</small></span><span class="assessment-model-check" aria-hidden="true">✓</span></button>
+                            <button type="button" role="menuitemradio" aria-checked="false" tabindex="-1" data-assessment-model="deepseek-v4-pro"><span class="assessment-model-symbol is-pro" aria-hidden="true"><svg class="icon"><use href="#i-sparkles"/></svg></span><span class="assessment-model-description"><strong>V4 Pro</strong><small>深入分析 · 支持联网搜索</small></span><span class="assessment-model-check" aria-hidden="true">✓</span></button>
                           </div>
                         </div>
                         <div id="assessment-effort-control" class="assessment-effort-control">
-                          <button id="assessment-effort-toggle" class="assessment-effort-toggle" type="button" aria-expanded="false" aria-controls="assessment-effort-popover" aria-label="推理强度：高" title="推理强度"><span id="assessment-effort-current">高</span><span aria-hidden="true">⌄</span></button>
+                          <button id="assessment-effort-toggle" class="assessment-effort-toggle" type="button" aria-expanded="false" aria-controls="assessment-effort-popover" aria-label="推理强度：高" title="推理强度"><span id="assessment-effort-current">高</span><svg class="icon assessment-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></button>
                           <div id="assessment-effort-popover" class="assessment-effort-popover" hidden>
                             <label for="assessment-effort">推理强度 <strong id="assessment-effort-name">高</strong></label>
                             <p id="assessment-effort-note">复杂问题，深入核对</p>

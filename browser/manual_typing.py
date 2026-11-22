@@ -189,6 +189,14 @@ class ManualTyping:
         await self._selector
         return self.snapshot()
 
+    async def bind_target(self, page, frame, element):
+        """Bind the exact editable element identified by a dedicated page adapter."""
+        await self.stop()
+        if page is not self.browser.page or frame.page is not page:
+            raise ManualTypingError('输入框不属于当前作业。')
+        await self._bind(page, frame, element)
+        return self.snapshot()['target']['token']
+
     async def _pick(self, timeout_seconds):
         token = self._selection_token
         started = time.monotonic()

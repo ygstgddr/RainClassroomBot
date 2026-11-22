@@ -5,7 +5,6 @@ import json
 from playwright.async_api import async_playwright
 
 from browser.assessment_page import question_script, fill_script, verify_fill_script
-from browser.assessment_submit import submission_script
 from core import assessment_agent
 from gui.assessment_tools import BrowserAgentTools
 from gui import assessment_tools
@@ -32,7 +31,7 @@ def test_model_must_try_tools_before_finishing_an_execution(monkeypatch):
     assert len(calls) == 3 and result['text'] == '完成读取。'
 
 
-def test_finish_submits_once_only_after_all_reviewed_answers(monkeypatch):
+def test_finish_leaves_all_reviewed_answers_for_manual_submission(monkeypatch):
     questions = [dict(id='1', kind='single', stem='1+1?', issues=[], options=[dict(id='1', text='2')])]
     class Browser:
         navigation_revision = 1
@@ -53,11 +52,11 @@ def test_finish_submits_once_only_after_all_reviewed_answers(monkeypatch):
     assert not browser.submissions
     agent.execute('read_questions', {'start':0})
     agent.execute('fill_reviewed_answers', {'answers':[{'id':'1', 'answer':'1'}]})
-    assert agent.finish()['submission']['state'] == 'submitted'
-    assert not agent.stopped()
-    assert agent.finish()['submission']['state'] == 'submitted'
-    assert browser.submissions == 1
-    assert agent.execute('browser_click', {'ref':'again'})['state'] == 'submitted'
+    assert agent.finish()['submission']['state'] == 'awaiting_review'
+    assert agent.finish()['submission']['state'] == 'awaiting_review'
+    assert 'submit_checked_answers' not in {t['name'] for t in agent.specs()}
+    assert agent.execute('submit_checked_answers', {}).get('error')
+    assert not browser.submissions and not agent.stopped()
     readonly = BrowserAgentTools(browser, 'fake', fill=False, cancelled=lambda:False, on_event=lambda _:None)
     assert 'submit_checked_answers' not in {t['name'] for t in readonly.specs()}
     assert readonly.execute('submit_checked_answers', {}).get('error')
@@ -106,7 +105,7 @@ def test_adjudication_requires_source_evidence_and_valid_answer(monkeypatch):
     assert calls[0]['model'] == 'deepseek-v4-pro'
 
 
-def test_submission_checks_actual_values_dialog_and_receipt_in_edge():
+def test_user_can_edit_after_fill_and_no_submission_in_edge():
     async def scenario():
         async with async_playwright() as engine:
             browser = await engine.chromium.launch(channel='msedge', headless=True)
@@ -134,47 +133,13 @@ def test_submission_checks_actual_values_dialog_and_receipt_in_edge():
                 await page.goto('https://study.test/fixture')
                 expected = await page.evaluate(question_script('https://study.test'))
                 answers = {'1':'1','2':['1','2'],'3':'2'}
-                def script(begin=False):
-                    return submission_script('https://study.test', '_rain_assessment_v1', None, expected, answers, begin=begin)
-                assert (await page.evaluate(script(True)))['state'] == 'blocked'
-                assert not sent
                 result = await page.evaluate(fill_script('https://study.test', '_rain_assessment_v1', None, expected, answers))
-                assert result['filled'] == ['1','2','3']
-                assert (await page.evaluate(verify_fill_script('https://study.test', '_rain_assessment_v1', None, expected, answers)))['filled'] == ['1','2','3']
-                # A user edit after review must stop submission.
-                await page.locator('textarea').fill('wrong')
-                assert (await page.evaluate(script(True)))['state'] == 'blocked'
-                await page.locator('textarea').fill('2')
-                submitted = await page.evaluate(script(True))
-                assert submitted['state'] == 'waiting', submitted
-                assert not sent and await page.evaluate('clicks') == 1
-                assert (await page.evaluate(script()))['state'] == 'waiting'
-                await page.get_by_role('status').wait_for()
-                assert (await page.evaluate(script()))['state'] == 'submitted'
-                assert (await page.evaluate(script(True)))['state'] == 'submitted'
-                assert len(sent) == 1 and await page.evaluate('[clicks,confirms]') == [1,1]
-                # Missing server receipt never becomes a claimed success or a retry.
-                await page.reload()
-                expected = await page.evaluate(question_script('https://study.test'))
-                await page.evaluate(fill_script('https://study.test', '_rain_assessment_v1', None, expected, answers))
-                await page.evaluate('() => {window.confirmSubmit=()=>{window.confirms++;document.querySelector("dialog").close()}}')
-                await page.evaluate(script(True))
-                await page.evaluate(script())
-                for _ in range(3):
-                    assert (await page.evaluate(script(True)))['state'] == 'waiting'
-                assert await page.evaluate('[clicks,confirms]') == [1,1]
-                # Hidden/paginated questions prevent an incomplete submission.
-                await page.reload()
-                expected = await page.evaluate(question_script('https://study.test'))
-                await page.evaluate(fill_script('https://study.test', '_rain_assessment_v1', None, expected, answers))
-                await page.evaluate('document.body.insertAdjacentHTML("beforeend","<button>下一页</button>")')
-                assert (await page.evaluate(script(True)))['state'] == 'blocked'
-                assert await page.evaluate('clicks') == 0
-                await page.get_by_role('button', name='下一页').evaluate('el=>el.remove()')
-                await page.evaluate('document.body.insertAdjacentHTML("beforeend","<div>遗漏的自定义题目<textarea></textarea></div>")')
-                omitted = await page.evaluate(script(True))
-                assert omitted['state'] == 'blocked' and '未纳入' in omitted['message']
-                assert await page.evaluate('clicks') == 0
+                verified = await page.evaluate(verify_fill_script('https://study.test', '_rain_assessment_v1', None, expected, answers))
+                assert verified['filled'] == ['1','2','3'] and not result['errors']
+                assert not sent and await page.evaluate('[clicks,confirms]') == [0,0]
+                await page.locator('textarea').fill('my edit')
+                verified = await page.evaluate(verify_fill_script('https://study.test', '_rain_assessment_v1', None, expected, answers))
+                assert verified['filled'] == ['1','2'] and not sent
             finally:
                 await browser.close()
     asyncio.run(scenario())

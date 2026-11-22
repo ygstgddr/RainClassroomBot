@@ -305,7 +305,12 @@ def test_reader_and_answer_panel_in_edge():
                 receipt = {'filled': ['1'], 'review_notes': {'2': '两轮独立复核的答案不一致。'},
                            'errors': {'3': '页面未确认选中。'}, 'corrected': ['1']}
                 snapshot['assessment']['fill_receipt'] = receipt
+                counts = dict(input=120, output=56, total=176, reported=2, missing=0, split=2)
+                snapshot['assessment'].update(usage=counts)
+                snapshot['assessment']['history'][-1]['usage'] = counts
                 await panel.evaluate('s => RainUI.applySnapshot(s)', snapshot)
+                assert await panel.locator('#assessment-usage').inner_text() == '累计 176 tokens'
+                assert '输入 120 / 输出 56' in await panel.locator('.assessment-reply-footer small').get_attribute('title')
                 assert await panel.locator('.assessment-user').inner_text() == '## **保持原样**'
                 assert await panel.locator('.assessment-response h4 strong').inner_text() == '复习要点'
                 assert await panel.locator('.assessment-response li').count() == 2
@@ -355,7 +360,7 @@ def test_reader_and_answer_panel_in_edge():
                 await panel.evaluate('s => RainUI.applySnapshot(s)', snapshot)
                 assert await panel.locator('#assessment-task-count').inner_text() == '1'
                 assert await panel.locator('#assessment-progress').inner_text() == '1 项未完成 · 测验 1'
-                assert await panel.locator('#assessment-tasks li').count() == 1
+                assert await panel.locator('#assessment-tasks .assessment-task').count() == 1
                 assert not await panel.get_by_text('已提交的作业', exact=True).count()
                 await panel.get_by_role('button', name='交给 Agent').click()
                 await panel.wait_for_function('!RainUI.getState().pending')
@@ -363,10 +368,22 @@ def test_reader_and_answer_panel_in_edge():
                     'effort': 'high', 'web_search': True}) in actions
                 assert await panel.locator('#assessment-chat-view').is_visible()
                 await panel.locator('[data-action=assessment_tab_tasks]').click()
+                manual = dict(pending, id='2:4', course='生物统计学', title='上传实验报告',
+                              requires_file=True, class_name='生技1班', time_limit='45分钟', no_deadline=True)
+                snapshot['assessment']['tasks'] = [pending, manual, complete]
+                await panel.evaluate('s => RainUI.applySnapshot(s)', snapshot)
+                groups = panel.locator('#assessment-tasks details')
+                assert await groups.count() == 2
+                subject = groups.filter(has_text='生物统计学')
+                await subject.locator('summary').click()
+                assert await subject.get_by_text('生技1班').is_visible()
+                assert await subject.get_by_text('截止 无 · 45分钟').is_visible()
+                assert await subject.get_by_text('手动提交文件').is_visible()
+                assert not await subject.get_by_role('button', name='交给 Agent').count()
                 snapshot['assessment']['tasks'] = [complete]
                 await panel.evaluate('s => RainUI.applySnapshot(s)', snapshot)
                 assert await panel.locator('#assessment-task-count').is_hidden()
-                assert not await panel.locator('#assessment-tasks li').count()
+                assert not await panel.locator('#assessment-tasks .assessment-task').count()
                 assert await panel.locator('#assessment-empty-title').inner_text() == '没有待办任务'
                 snapshot['assessment']['failed'] = ['未读取的课程']
                 await panel.evaluate('s => RainUI.applySnapshot(s)', snapshot)

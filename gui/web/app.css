@@ -632,7 +632,7 @@ html.desktop-glass {
   --agent-warning: #794d25;
   --agent-padding: 17px;
   container-type: inline-size;
-  flex: 0 0 clamp(324px, 38%, 456px);
+  flex: 0 0 clamp(278px, 26%, 338px);
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -1063,7 +1063,7 @@ html.desktop-glass {
   .assessment-composer-tools select, .assessment-check, .assessment-effort-toggle, .assessment-model-toggle { min-height: 26px; padding-inline: 3px; }
   .assessment-send { position: absolute; inset: 6px 6px auto auto; width: 30px; height: 30px; }
 }
-@media (max-width: 1020px) {
+@media (max-width: 1400px) {
   .browser-page-active:has(.assessment-panel:not([hidden])) .sidebar { width: 62px; padding: 15px 8px 10px; border-radius: 19px; }
   .browser-page-active:has(.assessment-panel:not([hidden])) .sidebar .brand { justify-content: center; margin: 0 0 15px; }
   .browser-page-active:has(.assessment-panel:not([hidden])) .sidebar .nav-button { justify-content: center; min-height: 40px; padding: 8px; }
@@ -1071,7 +1071,7 @@ html.desktop-glass {
   .browser-page-active:has(.assessment-panel:not([hidden])) .sidebar .error-dot { position: absolute; top: 8px; right: 8px; }
   .browser-page-active:has(.assessment-panel:not([hidden])) .sidebar :is(.brand > span:not(.brand-mark), .nav-caption, .connection-card, .account-card > :not(.avatar)) { display: none; }
   .browser-page-active:has(.assessment-panel:not([hidden])) .sidebar .account-card { justify-content: center; padding-inline: 0; }
-  .assessment-panel { --agent-padding: 12px; flex-basis: clamp(300px, 41%, 356px); }
+  .assessment-panel { --agent-padding: 12px; flex-basis: clamp(274px, 26%, 312px); }
 }
 @media (max-height: 710px) {
   .browser-page-active:has(.assessment-panel:not([hidden])) .topbar { height: 32px; margin-bottom: 10px; }

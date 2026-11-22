@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from core.assessment_model import AssessmentModelError, _OPENER
+from core.assessment_usage import record_usage
 
 
 API_URL = "https://api.deepseek.com/responses"
@@ -66,6 +67,7 @@ def _request_response(api_key: str, payload: dict[str, Any]) -> list[dict[str, A
         raise AssessmentModelError(_INVALID_RESPONSE) from None
     if not isinstance(response, dict):
         raise AssessmentModelError(_INVALID_RESPONSE)
+    record_usage(response)
     if response.get("status") == "incomplete":
         raise AssessmentModelError("DeepSeek 未完整输出，请缩小题目范围后重试。")
     if response.get("status") != "completed" or response.get("error") is not None:

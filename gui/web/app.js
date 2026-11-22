@@ -140,13 +140,31 @@
       item.setAttribute('aria-pressed', String(active));
     });
     $('assessment-model').disabled = $('assessment-model-toggle').disabled = $('assessment-effort').disabled = $('assessment-effort-toggle').disabled = busy;
+    const shownModel = a.active_model || $('assessment-model').value;
+    const modelLabel = shownModel === 'deepseek-v4-pro' ? 'V4 Pro' : 'Flash';
+    setText('assessment-model-current', modelLabel);
+    $('assessment-model-toggle').setAttribute('aria-label', (a.active_model ? '本轮模型：' : '选择模型：') + modelLabel);
     if (busy || keyOpen || panel.hidden) { setAssessmentEffortOpen(false); setAssessmentModelOpen(false); }
     $('assessment-web').disabled = busy || $('assessment-model').value !== 'deepseek-v4-pro';
     $('assessment-cancel').hidden = !scanning && !opening && !a.operation;
     $('assessment-cancel').disabled = ui.pending;
     $('assessment-scan').disabled = browserBusy || !a.has_key;
+    const meter = $('assessment-usage');
+    meter.hidden = !a.usage?.reported && !a.usage?.missing;
+    if (!meter.hidden) {
+      const { label, detail } = tokenUsage(a.usage);
+      setText('assessment-usage', '累计 ' + label);
+      meter.title = '本次对话累计 · ' + detail;
+      meter.setAttribute('aria-label', meter.title);
+    }
     $('assessment-review').disabled = browserBusy || !a.has_key || s.browser.phase !== 'ready';
     $('assessment-read-started').hidden = !chatting;
+    const courseExercise = /\/ai-workspace\/lms-graph\/\d+\/exercise\/\d+(?:[/?#]|$)/.test(s.browser.url || '');
+    const runLabel = courseExercise ? '处理当前作业' : '填写当前题页';
+    setText('assessment-run-label', runLabel);
+    setText('assessment-review', runLabel);
+    $('assessment-read-started').title = $('assessment-review').title = courseExercise ?
+      '开放型作业使用 DeepSeek V4 Pro 逐轮打字并发送；网站可能在对话中评分' : '填写并复核，交卷前由你检查';
     $('assessment-read-started').disabled = $('assessment-review').disabled;
     $('assessment-read-page').disabled = browserBusy;
     if (!a.available) $('assessment-read-page').checked = false;
@@ -192,31 +210,53 @@
       fingerprints.assessment = hash;
       $('assessment-failed-courses').replaceChildren(...failed.map(name => make('li', '', name)));
       const list = document.createDocumentFragment();
-      const occurrences = new Map();
-      const taskName = t => JSON.stringify([t.course, t.title]);
-      tasks.forEach(t => occurrences.set(taskName(t), (occurrences.get(taskName(t)) || 0) + 1));
-      tasks.forEach(t => {
-        const item = make('li', 'assessment-task');
-        const mark = make('span', 'assessment-mark');
-        mark.append(icon(t.state === 'locked' ? 'clock' : t.kind === 'exam' ? 'book' : 'file'));
-        const copy = make('div');
-        const classroom = occurrences.get(taskName(t)) > 1 ? ` · 班级 ${asText(t.id).split(':')[0]}` : '';
-        const state = ({ locked: '未开放', manual: '可核对', unknown: '进度未知' })[t.state] || t.state;
-        const status = make('span', 'assessment-task-status', state);
-        if (t.state === 'manual') status.classList.add('is-manual');
-        const meta = make('p', 'assessment-task-meta');
-        meta.append(make('span', '', `${t.course}${classroom} · ${typeNames[t.kind] || t.kind}`), status);
-        copy.append(make('strong', '', t.title), meta);
-        item.append(mark, copy);
-        if (t.state !== 'locked') {
-          const open = actionButton('交给 Agent', 'assessment_select_task');
-          open.title = '自动进入此任务，可能立即开始计时';
-          open.dataset.id = t.id;
-          open.disabled = browserBusy;
-          item.append(open);
-        }
-        list.append(item);
-      });
+      const groups = new Map();
+      const previous = new Map(Array.from($('assessment-tasks').querySelectorAll('details'), el => [el.dataset.course, el.open]));
+      for (const task of tasks) {
+        const course = task.course || '未标注学科';
+        if (!groups.has(course)) groups.set(course, []);
+        groups.get(course).push(task);
+      }
+      for (const [course, rows] of groups) {
+        const section = make('li', 'assessment-course');
+        const details = make('details');
+        details.dataset.course = course;
+        details.open = previous.get(course) ?? course === groups.keys().next().value;
+        const heading = make('summary');
+        heading.append(make('strong', '', course), make('small', '', rows.length + ' 项'));
+        const items = make('ul', 'assessment-list');
+        details.append(heading, items);
+        section.append(details);
+        list.append(section);
+        rows.forEach(t => {
+          const item = make('li', 'assessment-task');
+          const mark = make('span', 'assessment-mark');
+          mark.append(icon(t.requires_file ? 'file' : t.kind === 'exam' ? 'book' : 'list'));
+          const copy = make('div');
+          const state = ({ locked: '未开放', manual: '可核对', unknown: '进度未知' })[t.state] || t.state;
+          const status = make('span', 'assessment-task-status', state);
+          if (t.state === 'manual') status.classList.add('is-manual');
+          const meta = make('p', 'assessment-task-meta');
+          meta.append(make('span', '', t.requires_file ? '手动提交文件' : t.open_work ? '开放型作业 · V4 Pro' : typeNames[t.kind] || t.kind), status);
+          copy.append(make('strong', '', t.title), meta);
+          const groupName = t.class_name || ('班级 ' + asText(t.id).split(':')[0]);
+          const classLine = make('p', 'assessment-class', groupName);
+          classLine.title = groupName;
+          const due = t.task_deadline ? new Date(t.task_deadline * 1000).toLocaleString('zh-CN', {
+            timeZone: 'Asia/Shanghai', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false
+          }) : t.no_deadline ? '无' : '未公布';
+          copy.append(classLine, make('p', 'assessment-task-meta', '截止 ' + due + ' · ' + (t.time_limit || '限时未公布')));
+          item.append(mark, copy);
+          if (t.state !== 'locked' && !t.requires_file) {
+            const open = actionButton('交给 Agent', 'assessment_select_task');
+            open.title = '自动进入此任务，可能立即开始计时';
+            open.dataset.id = t.id;
+            open.disabled = browserBusy;
+            item.append(open);
+          }
+          items.append(item);
+        });
+      }
       $('assessment-tasks').replaceChildren(list);
     }
     renderAssessmentChat(a.history || [], a.operation === 'agent' ? (a.steps || []).at(-1) || '正在请求模型' : '', a.fill_receipt);
@@ -229,7 +269,7 @@
     if (result.error) card.append(make('p', '', result.error));
     if (result.submission) {
       const state = result.submission.state;
-      const label = state === 'submitted' ? '已确认提交' : state === 'blocked' ? '未提交' : '提交结果待确认';
+      const label = state === 'awaiting_review' ? '待你检查' : state === 'submitted' ? '已确认提交' : state === 'blocked' ? '未提交' : '提交结果待确认';
       card.append(make('p', 'assessment-submission', `${label} · ${result.submission.message || ''}`));
     }
     const notes = make('ul');
@@ -295,6 +335,14 @@
       }
     }
     return response;
+  }
+
+  function tokenUsage(usage) {
+    const format = n => n.toLocaleString('zh-CN');
+    if (!usage.reported) return { label: 'Tokens —', detail: '接口未返回 Token 用量' };
+    const label = (usage.missing ? '≥ ' : '') + format(usage.total) + ' tokens';
+    const split = usage.split === usage.reported ? ' · 输入 ' + format(usage.input) + ' / 输出 ' + format(usage.output) : '';
+    return { label, detail: label + split + (usage.missing ? ' · 部分请求未返回用量' : '') };
   }
 
   function renderAssessmentChat(history, liveStep, receipt) {
@@ -374,7 +422,17 @@
         const copy = make('button', 'assessment-copy', '复制回复');
         copy.type = 'button';
         copy.addEventListener('click', () => copyAssessmentReply(item.text));
-        entry.append(copy);
+        const footer = make('div', 'assessment-reply-footer');
+        footer.append(copy);
+        if (item.usage) {
+          const usage = tokenUsage(item.usage);
+          const count = make('small', 'assessment-usage', usage.label);
+          count.title = '本轮 · ' + usage.detail;
+          count.setAttribute('aria-label', count.title);
+          count.tabIndex = 0;
+          footer.append(count);
+        }
+        entry.append(footer);
       }
       messages.append(entry);
     });

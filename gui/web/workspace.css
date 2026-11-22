@@ -29,3 +29,59 @@
 .course-dates .icon { width: 13px; height: 13px; }
 .course-dates .course-date { display: inline; margin: 0; font-size: inherit; color: inherit; }
 .course-card:focus-visible, .bulk-select summary:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }
+
+.assessment-course { list-style: none; border-bottom: 1px solid var(--line); }
+.assessment-course summary { cursor: pointer; padding: 11px 6px; font-size: 14px; }
+.assessment-course summary small { margin-inline-start: 8px; font-weight: 400; color: var(--muted); }
+.assessment-course .assessment-class { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin: 3px 0; font-size: 12px; }
+.assessment-course .assessment-task > div { min-width: 0; }
+.assessment-course .assessment-task-meta { flex-wrap: wrap; }
+
+/* Compact Agent dock. Popovers share the composer's left edge at every width. */
+.assessment-panel { --agent-padding: 12px; }
+.assessment-heading { gap: 8px; }
+.assessment-icon-button, .assessment-panel .compact-button, .assessment-copy { border-radius: 999px; }
+.assessment-panel .assessment-run-bar { justify-content: flex-start; min-width: 0; gap: 5px; }
+.assessment-run-bar #assessment-read-started { padding: 4px 9px; min-height: 26px; background: var(--agent-hover); }
+.assessment-run-bar:has(#assessment-usage:not([hidden])) { display: flex; }
+.assessment-usage { margin-left: auto; color: var(--agent-muted); font: 500 11px/1.4 "Segoe UI", sans-serif; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.assessment-reply-footer { display: flex; align-items: center; gap: 8px; }
+.assessment-reply-footer .assessment-copy { margin: 0; }
+.assessment-composer { position: relative; border-radius: 20px; box-shadow: inset 0 1px 0 var(--agent-line); }
+.assessment-composer:focus-within:has(textarea:focus) { border-color: var(--agent-tint); outline: none; }
+.assessment-composer textarea { min-height: 42px; height: auto; max-height: min(98px,14dvh); padding: 10px 12px 2px; font-size: 14px; }
+.assessment-composer-tools { align-items: center; padding: 4px 6px 6px; gap: 4px; }
+.assessment-composer-options { flex-wrap: nowrap; gap: 2px; }
+.assessment-composer-options :is(.assessment-model-toggle,.assessment-effort-toggle,.assessment-check) {
+  min-height: 28px; padding-inline: 7px; gap: 3px; border-radius: 999px; font-size: 12px;
+}
+.assessment-composer-options :is(.assessment-model-toggle,.assessment-effort-toggle)[aria-expanded=true] {
+  color: var(--agent-tint); background: var(--agent-bubble); box-shadow: inset 0 0 0 1px var(--agent-line);
+}
+.assessment-composer-options .assessment-chevron { width: 10px; height: 10px; transform: rotate(90deg); }
+.assessment-composer-tools .assessment-send { position: static; width: 29px; height: 29px; margin-left: auto; border-radius: 50%; }
+.assessment-model-control, .assessment-effort-control { position: static; }
+.assessment-model-menu, .assessment-effort-popover {
+  inset: auto auto 41px 5px; width: min(218px, calc(100% - 10px)); border-radius: 19px;
+  box-shadow: 0 8px 24px rgba(17,30,48,.2), inset 0 1px 0 var(--agent-line);
+}
+.assessment-model-menu { padding: 6px; }
+.assessment-model-heading { padding: 5px 10px 6px; }
+.assessment-model-menu [role=menuitemradio] { border-radius: 13px; padding: 8px; gap: 9px; }
+.assessment-model-symbol { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 9px; background: var(--agent-hover); }
+.assessment-model-symbol .icon { width: 16px; height: 16px; }
+.assessment-model-description { gap: 2px; }
+.assessment-effort-popover { padding: 13px 15px 11px; gap: 5px; }
+.assessment-effort-popover strong { font-size: 14px; }
+.assessment-effort-popover input { height: 24px; background: transparent; box-shadow: none; }
+.assessment-effort-popover input::-webkit-slider-runnable-track {
+  height: 6px; border-radius: 999px;
+  background: linear-gradient(to right, var(--effort-color) var(--effort-fill), var(--agent-bubble) var(--effort-fill));
+}
+.assessment-effort-popover input::-webkit-slider-thumb { width: 17px; height: 17px; margin-top: -5.5px; }
+.assessment-effort-labels { font-size: 11px; }
+@container (max-width: 310px) {
+  .assessment-composer-options .assessment-check { width: 27px; justify-content: center; padding: 0; }
+  .assessment-check span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .assessment-check .icon { width: 15px; height: 15px; }
+}

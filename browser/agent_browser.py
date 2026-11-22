@@ -12,9 +12,8 @@ from uuid import uuid4
 
 from playwright.sync_api import sync_playwright, Error as BrowserError
 from browser.assessment_page import (adapt_groups, normalize_capture, question_script,
-    surface_script, fill_script, verify_fill_script)
+    surface_script, fill_script, verify_fill_script, eligibility_script)
 from browser.assessment_route import assessment_origin
-from browser.assessment_submit import submission_script
 
 
 class AgentBrowser:
@@ -102,7 +101,10 @@ class AgentBrowser:
         return {'title': self.page.title(), 'url': self.page.url.split('?')[0],
                 'text': self.page.locator('body').inner_text(timeout=5000)[:22000],
                 'controls': controls, 'revision': self.navigation_revision,
-                'note': '操作引用仅本次观察有效；需写答案时使用复核填写工具，交卷使用提交工具。'}
+                'note': '操作引用仅本次观察有效；需写答案时使用复核填写工具，交卷由用户操作。'}
+
+    def requires_file(self):
+        return self._eval(eligibility_script(self._check(), self.registry))['requires_file']
 
     def interact(self, action, ref=None, direction=None):
         self._check()
@@ -116,12 +118,13 @@ class AgentBrowser:
         if not handle or not handle.is_visible() or not handle.is_enabled():
             raise ValueError('目标已过期或不可操作，请重新观察。')
         info = handle.evaluate('''el=>({label:(el.innerText||el.getAttribute('aria-label')||el.value||'').trim(),
-            tag:el.tagName,type:el.type,href:el.href||'',answer:!!el.closest('fieldset,[data-question-id],section.subject-item')})''')
-        # Answer writes and final submission have a separate reviewed path.
-        if (info['answer'] or info['tag'] in ('INPUT', 'TEXTAREA', 'SELECT')
+            tag:el.tagName,type:el.type,href:el.href||'',submits:!!el.form&&['submit','image'].includes(el.type),
+            answer:!!el.closest('fieldset,[data-question-id],.subject-item,dialog,[role=dialog]')})''')
+        if (not re.fullmatch(r'(展开|收起|显示|隐藏)(?:说明|目录|答题卡|题目导航|全部)?[ »›«]*', info['label'])
+                or info['submits'] or info['answer'] or info['tag'] in ('INPUT', 'TEXTAREA', 'SELECT')
                 or re.search(r'交卷|提交|删除|退出|注销|下载|上传|支付|购买', info['label'])
                 or info['href'] and not info['href'].startswith(self.initial_url.split('?')[0] + '#')):
-            raise ValueError('该控件不能通过普通点击执行；答题请使用复核填写，交卷请使用核对提交工具。')
+            raise ValueError('该控件不能通过普通点击执行；答题请使用复核填写，交卷由用户操作。')
         before = self.navigation_revision
         clicked = False
         try:
@@ -219,48 +222,6 @@ class AgentBrowser:
             for qid in set(pending) - set(confirmed['filled']):
                 result['errors'][qid] = '页面未确认写入。'
         return result
-
-    def submit_assessment_answers(self, capture, answers, *, cancelled):
-        expected, proposals = self.revalidate_assessment_page(capture)
-        if (capture[1] or any(q['issues'] for q in capture[0]) or set(answers) != {q['id'] for q in capture[0]}):
-            return {'state':'blocked', 'message':'题目未完整读取或复核，不能提交。'}
-        deadline, begin = time.monotonic()+20, True
-        while time.monotonic() < deadline:
-            if not begin and (receipt := self.submission_receipt()):
-                return receipt
-            if cancelled(): return {'state':'unknown', 'message':'操作已停止，请核对网站提交结果。'}
-            try:
-                result = self._eval(submission_script(self._check(), self.registry, proposals, expected, answers, begin=begin))
-            except Exception:
-                if receipt := self.submission_receipt():
-                    return receipt
-                return {'state':'unknown', 'message':'提交后页面发生变化，请重新扫描确认；不会重复交卷。'}
-            if result.get('state') != 'waiting': return result
-            begin = False
-            self.page.wait_for_timeout(250)
-        return {'state':'unknown', 'message':'等待提交回执超时，不会重复交卷。'}
-
-    def submission_receipt(self):
-        """Recognize the real site's post-submit cover for this exact exam ID."""
-        if self.cancelled() or not self.exam_id:
-            return None
-        try:
-            self._check()
-            if urlsplit(self.page.url).path.rstrip('/') != '/cover/' + self.exam_id:
-                return None
-            self.page.wait_for_load_state('domcontentloaded', timeout=4000)
-            marker = self.page.locator('img[alt="已交卷"]')
-            marker.wait_for(state='visible', timeout=4000)
-            text = self.page.locator('body').inner_text(timeout=2000)
-            if not all(label in text for label in ('试卷得分','未作答','作答次数')):
-                return None
-            score = re.search(r'(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)\s*试卷得分', text)
-            return {'state':'submitted','message':'网站成绩页已确认交卷。' + (f' 得分 {score[1]}/{score[2]}。' if score else ''),
-                    'evidence':'已交卷标识与同一试卷成绩页', 'score': score[1] if score else None,
-                    'total':score[2] if score else None}
-        except (ValueError, BrowserError):
-            return None
-
 
 @contextmanager
 def connect_agent_browser(endpoint, source, home, cancelled):

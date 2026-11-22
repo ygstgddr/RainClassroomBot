@@ -1,7 +1,9 @@
 """Consent, chat, and task state for the learning browser's Agent console."""
 from collections import Counter
+import asyncio
 import threading
 import uuid
+from urllib.parse import urlsplit
 
 from core.assessment_model import AssessmentModelError, review_questions, summarize_inventory
 from core.assessment_agent import run_agent
@@ -9,6 +11,7 @@ from core.assessment_credentials import clear_key, load_key, save_key
 from core.courses import window_reason
 from core.config import app_root
 from gui.assessment_tools import AGENT_PROMPT, BrowserAgentTools
+from core.assessment_usage import collect_usage
 
 
 MODELS = ('deepseek-flash', 'deepseek-v4-pro')
@@ -29,11 +32,13 @@ class AssessmentPanel:
         self.message = ''
         self._credentials_loaded = False
         self.history = []
+        self.usage = {}
         self.steps = []
         self.fill_receipt = {}
         self.entry_id = None
         self.entry_options = None
         self.agent_uses_browser = False
+        self.active_model = None
 
     @property
     def owns_browser(self):
@@ -51,16 +56,27 @@ class AssessmentPanel:
         self.steps = []
         if clear_chat:
             self.history = []
+            self.usage = {}
             self.fill_receipt = {}
 
     def _start(self, operation, work, on_success):
         scope = self.scope
+        conversation = self.usage
+        turn = {}
+        def report(delta):
+            with self.owner._lock:
+                for counts in (conversation, turn):
+                    for key, number in delta.items():
+                        counts[key] = counts.get(key, 0) + number
         self.operation = operation
         self.message = ''
 
         def run():
             try:
-                result = work()
+                with collect_usage(report):
+                    result = work()
+                if operation == 'agent' and isinstance(result, dict) and turn:
+                    result['usage'] = turn
                 error = ''
             except (ValueError, AssessmentModelError) as exc:
                 error = str(exc)
@@ -102,10 +118,10 @@ class AssessmentPanel:
             self.entry_id = None
             if self.key and self.entry_options and browser.document_digest() == current_entry['document']:
                 self._agent('检查并填写当前已授权的作业或测验题页。先读取题目，必要时观察并建立题目分组。'
-                            '把共享阅读材料和题干结合起来，复核并填写；全部通过后自行检查、确认并提交，等待网站回执。',
+                            '把共享阅读材料和题干结合起来，复核并填写；填写结束后停在题页，由用户检查和提交。',
                             self.entry_options, fill=True, read=True)
             else:
-                self.message = '打开后网页发生变化，请核对页面，再点「完整执行当前题页」。'
+                self.message = '打开后网页发生变化，请核对页面，再点「填写当前题页」。'
 
         phase = report.get('phase', 'idle')
         if phase in ('queued', 'running') and desired != 'assessment_scan':
@@ -114,6 +130,8 @@ class AssessmentPanel:
         issues = [f"第 {item['id']} 题 · {'、'.join(item['issues'])}" for item in questions if item['issues']]
         return {
             'available': available, 'has_key': bool(self.key), 'operation': self.operation,
+            'active_model': self.active_model if self.operation == 'agent' else None,
+            'usage': dict(self.usage),
             'phase': phase, 'message': self.message, 'scan_message': report.get('message', ''),
             'stats': stats, 'tasks': tasks, 'failed': report.get('failed', []), 'summary': self.summary,
             'captured': len(questions), 'readable': len(questions) - len(issues), 'issues': issues,
@@ -139,6 +157,7 @@ class AssessmentPanel:
             raise ValueError('请先保存 DeepSeek API Key。')
         owner, scope, key = self.owner, self.scope, self.key
         self.agent_uses_browser = read
+        self.active_model = None
         self.steps = []
         self.fill_receipt = {}
         self.history = [*self.history[-18:], {'role': 'user', 'text': text}]
@@ -153,8 +172,8 @@ class AssessmentPanel:
 
         def event(step):
             with owner._lock:
-                if not cancelled() and len(self.steps) < 24:
-                    self.steps = [*self.steps, step]
+                if not cancelled():
+                    self.steps = [*self.steps[-23:], step]
 
         def receipt(result):
             with owner._lock:
@@ -163,11 +182,21 @@ class AssessmentPanel:
 
         def run():
             if read:
+                embedded = owner.embedded_browser
+                if fill and hasattr(embedded, 'agent_connection'):
+                    from browser.open_work import run_dialogue
+                    result = asyncio.run(run_dialogue(*embedded.agent_connection(), key=key, options=options,
+                        cancelled=cancelled, event=event, store=owner.store, account=self.account,
+                        on_model=lambda model: setattr(self, 'active_model', model)))
+                    if result is not None:
+                        return result
                 with owner.embedded_browser.agent_session(cancelled) as browser:
                     return execute_browser(browser)
             return run_agent(key, messages, **options, tools=[], execute=lambda *_: {}, cancelled=cancelled)
 
         def execute_browser(browser):
+            if fill and browser.requires_file():
+                return {'text': '这份任务要求提交文件，已留给你手动完成。'}
             browser_tools = BrowserAgentTools(browser, key, fill=fill, cancelled=cancelled,
                                               on_event=event, on_receipt=receipt)
             result = run_agent(key, messages, **options, tools=browser_tools.specs(), execute=browser_tools.execute,
@@ -175,9 +204,7 @@ class AssessmentPanel:
             if fill and not browser_tools.stopped():
                 final = browser_tools.finish()
                 receipt(final)
-                submitted = final.get('submission', {})
-                status = ((submitted.get('message') or '网站已确认提交成功。') if submitted.get('state') == 'submitted'
-                          else submitted.get('message') or final.get('error') or '尚未提交：仍有题目需要处理。')
+                status = final.get('submission', {}).get('message') or final.get('error') or '请检查题页后手动提交。'
                 # Execution status is produced by the controller, not model claims.
                 result['text'] = f"{status}\n\n实际写入 {len(final.get('filled', []))} 题。" + (
                     '\n存在未通过复核或未能写入的题目，请查看执行回执。'
@@ -233,6 +260,7 @@ class AssessmentPanel:
             if payload or self.operation:
                 raise ValueError('请结束当前操作后再清空对话。')
             self.history = []
+            self.usage = {}
             self.steps = []
             self.fill_receipt = {}
             return {'ok': True}
@@ -253,8 +281,13 @@ class AssessmentPanel:
         if name == 'assessment_run_current':
             if set(payload) != {'model', 'effort', 'web_search'}:
                 raise ValueError('填写参数无效。')
-            self._agent('观察并填写当前这页已批准的题目。只填写工具复核通过的题目，'
-                        '全部通过后自行核对、交卷并确认，等待网站提交回执。', self._options(payload), fill=True, read=True)
+            from browser.open_work import EXERCISE
+            source = owner.embedded_browser.snapshot().get('url') or ''
+            instruction = ('处理当前课程作业。开放型问答使用 DeepSeek V4 Pro，逐轮核对并发送。'
+                           if EXERCISE.fullmatch(urlsplit(source).path) else
+                           '观察并填写当前这页已批准的题目。只填写工具复核通过的题目，'
+                           '写入后请用户检查，留在题页等待手动提交。')
+            self._agent(instruction, self._options(payload), fill=True, read=True)
             return {'ok': True}
         if name == 'assessment_select_task':
             if set(payload) != {'id', 'model', 'effort', 'web_search'} or not self.key:
@@ -264,6 +297,7 @@ class AssessmentPanel:
             catalog = {str(c['classroom_id']): c for c in owner.store.catalog(account)}
             task = next((item for item in report.get('tasks', []) if item['id'] == payload['id']
                          and not window_reason(catalog.get(item['id'].partition(':')[0]), item)
+                         and not item.get('requires_file')
                          and item['state'] not in ('completed', 'locked')), None)
             if (not account or report.get('account') != account
                     or report.get('phase') not in ('done', 'cancelled', 'error') or not task):
